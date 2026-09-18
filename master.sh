@@ -20,9 +20,11 @@ run_task_foreground() {
     echo "⏳ STARTING: $task_name" | tee -a /workspace/provisioning.log
     echo "============================================================" | tee -a /workspace/provisioning.log
     if python3 "$script_path" 2>&1 | tee -a /workspace/provisioning.log; then
+        echo "============================================================" | tee -a /workspace/provisioning.log
         echo "✅ COMPLETED: $task_name" | tee -a /workspace/provisioning.log
         echo "============================================================" | tee -a /workspace/provisioning.log
     else
+        echo "============================================================" | tee -a /workspace/provisioning.log
         echo "❌ ERROR: $task_name failed!" | tee -a /workspace/provisioning.log
         echo "============================================================" | tee -a /workspace/provisioning.log
         exit 1
@@ -38,10 +40,13 @@ run_task_background() {
     echo "   (Detailed output saving to $log_file)"
     echo "============================================================"
     if python3 "$script_path" > "$log_file" 2>&1; then
+        echo "============================================================"
         echo "✅ COMPLETED: $task_name"
         echo "============================================================"
     else
+        echo "============================================================"
         echo "❌ ERROR: $task_name failed!"
+        echo "🔍 Check $log_file for details."
         echo "============================================================"
     fi
 }
@@ -49,8 +54,9 @@ run_task_background() {
 # ==========================================
 # 🚀 FETCH SCRIPTS FROM GITHUB REPO
 # ==========================================
-# ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO' WITH YOUR ACTUAL GITHUB INFO!
-REPO_RAW_BASE="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO/main"
+# ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO_NAME' WITH YOUR ACTUAL GITHUB INFO!
+# ⚠️ CHANGE 'main' TO 'master' IF YOUR REPO'S DEFAULT BRANCH IS NAMED 'master'
+REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Fetching provisioning scripts from GitHub Repo..."
 SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_loras.py" "install_sageattention.py" "install_missing_nodes.py")
@@ -58,6 +64,19 @@ SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_
 for script in "${SCRIPTS[@]}"; do
     # Notice the /scripts/ folder in the URL!
     curl -sL "$REPO_RAW_BASE/scripts/$script" -o "/tmp/$script"
+    
+    # SAFETY CHECK: Did we accidentally download a 404 page?
+    if [ ! -s "/tmp/$script" ] || grep -q "404: Not Found" "/tmp/$script"; then
+        echo "============================================================"
+        echo "❌ CRITICAL ERROR: Failed to download $script"
+        echo "   The URL $REPO_RAW_BASE/scripts/$script returned a 404."
+        echo "   Please check:"
+        echo "   1. YOUR_USERNAME and YOUR_REPO_NAME are correct."
+        echo "   2. The branch name ('main' or 'master') is correct."
+        echo "   3. The file actually exists in the 'scripts/' folder in your repo."
+        echo "============================================================"
+        exit 1
+    fi
     chmod +x "/tmp/$script"
 done
 
@@ -72,9 +91,10 @@ echo "⏳ STARTING: Downloading Custom Workflow" | tee -a /workspace/provisionin
 echo "============================================================" | tee -a /workspace/provisioning.log
 WORKFLOW_DIR="/workspace/ComfyUI/user/default/workflows"
 mkdir -p "$WORKFLOW_DIR"
-# Notice the /workflows/ folder in the URL!
 curl -sL "$REPO_RAW_BASE/workflows/workflow_academia.json" -o "$WORKFLOW_DIR/workflow_academia.json"
 echo "✅ Workflow downloaded successfully!" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "✅ COMPLETED: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
@@ -88,10 +108,11 @@ echo "============================================================" | tee -a /wo
 
 TARGET_FILE="/workspace/ComfyUI/custom_nodes/ComfyUI-QwenVL-Mod/AILab_QwenVL.py"
 mkdir -p "$(dirname "$TARGET_FILE")"
-# Notice the /patches/ folder in the URL!
 curl -sL "$REPO_RAW_BASE/patches/AILab_QwenVL.py" -o "$TARGET_FILE"
 
 echo "✅ Custom AILab_QwenVL.py applied successfully!" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "✅ COMPLETED: Patching ComfyUI-QwenVL-Mod" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 # ==========================================
@@ -100,30 +121,60 @@ echo "============================================================" | tee -a /wo
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "🚀 STARTING: Launching ComfyUI EARLY" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
+echo "💡 You can now open the web UI on port 8188!" | tee -a /workspace/provisioning.log
 nohup /workspace/comfy_venv/bin/python /workspace/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui > /workspace/comfyui_startup.log 2>&1 &
 COMFY_PID=$!
 echo "✅ ComfyUI is running on port 8188." | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "✅ COMPLETED: Launching ComfyUI EARLY" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 # ==========================================
 # 🚀 PHASE 3: BACKGROUND DOWNLOADS & BUILD
 # ==========================================
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "⏳ STARTING: Background Tasks" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+
 (
     run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"
     run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
     run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
+    
+    echo "============================================================"
     echo "✅ ALL BACKGROUND TASKS FINISHED"
+    echo "============================================================"
 ) &
 BG_PID=$!
 
+echo "💡 Background tasks are running. Broad progress is shown below." | tee -a /workspace/provisioning.log
+
 # ==========================================
-# 🚀 PHASE 4: FINALIZE & RESTART
+# 🚀 PHASE 4: FINALIZE & RESTART WITH ACCELERATION
 # ==========================================
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "⏳ Waiting for background tasks to finish..." | tee -a /workspace/provisioning.log
 wait $BG_PID
+echo "✅ Background tasks finished!" | tee -a /workspace/provisioning.log
+
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "🔄 STARTING: Restarting ComfyUI with SageAttention & New Nodes" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
 
 kill $COMFY_PID 2>/dev/null || pkill -f "/workspace/ComfyUI/main.py"
 sleep 3
 
 nohup /workspace/comfy_venv/bin/python /workspace/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --use-sage-attention --enable-manager --enable-manager-legacy-ui > /workspace/comfyui_startup.log 2>&1 &
 
+echo "✅ ComfyUI restarted successfully." | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "✅ COMPLETED: Restarting ComfyUI with SageAttention & New Nodes" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+
+echo "============================================================" | tee -a /workspace/provisioning.log
 echo "🎉 ALL DONE!" | tee -a /workspace/provisioning.log
+echo "✅ ComfyUI is now running with SageAttention acceleration." | tee -a /workspace/provisioning.log
+echo "✅ All models, LoRAs, missing nodes, and custom patches are fully installed." | tee -a /workspace/provisioning.log
+echo "🔍 Main log: /workspace/provisioning.log" | tee -a /workspace/provisioning.log
+echo "🔍 Detailed background logs: /workspace/*.log" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
