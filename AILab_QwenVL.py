@@ -1,0 +1,1602 @@
+# ComfyUI-QwenVL
+# This custom node integrates the Qwen-VL series, including the latest Qwen3-VL models,
+# to enable advanced multimodal AI for text generation,
+# image understanding, and video analysis.
+#
+# Models License Notice:
+# - Qwen3-VL: Apache-2.0 License (https://huggingface.co/Qwen/Qwen3-VL-4B-Instruct)
+#
+# This integration script follows GPL-3.0 License.
+# When using or modifying this code, please respect both the original model licenses
+# and this integration's license terms.
+#
+# Source: https://github.com/1038lab/ComfyUI-QwenVL
+
+import gc
+import json
+import platform
+from enum import Enum
+from pathlib import Path
+import hashlib
+
+import numpy as np
+import psutil
+import torch
+from PIL import Image
+from huggingface_hub import snapshot_download, hf_hub_download
+from transformers import AutoProcessor, AutoTokenizer, BitsAndBytesConfig
+
+# SageAttention support
+# SageAttention 2.x exposes functions at top-level; 1.x had them in .core
+try:
+    from sageattention import (
+        sageattn_qk_int8_pv_fp16_cuda,
+        sageattn_qk_int8_pv_fp8_cuda,
+        sageattn_qk_int8_pv_fp8_cuda_sm90,
+    )
+    SAGE_ATTENTION_AVAILABLE = True
+except ImportError:
+    try:
+        from sageattention.core import (
+            sageattn_qk_int8_pv_fp16_cuda,
+            sageattn_qk_int8_pv_fp8_cuda,
+            sageattn_qk_int8_pv_fp8_cuda_sm90,
+        )
+        SAGE_ATTENTION_AVAILABLE = True
+    except ImportError as _sage_err:
+        SAGE_ATTENTION_AVAILABLE = False
+        print(f"[QwenVL] SageAttention import failed: {_sage_err}")
+
+# Global cache for generated prompts
+PROMPT_CACHE = {}
+CACHE_FILE = Path(__file__).parent / "prompt_cache.json"
+
+ATTENTION_MODES = ["auto", "sage", "flash_attention_2", "sdpa"]
+
+# Simple global variable to store last generated prompt
+LAST_SAVED_PROMPT = None
+
+def load_prompt_cache():
+    """Load prompt cache from file"""
+    global PROMPT_CACHE
+    try:
+        if CACHE_FILE.exists():
+            with open(CACHE_FILE, "r", encoding="utf-8") as f:
+                PROMPT_CACHE = json.load(f)
+                print(f"[QwenVL] Loaded {len(PROMPT_CACHE)} cached prompts")
+    except Exception as e:
+        print(f"[QwenVL] Failed to load prompt cache: {e}")
+        PROMPT_CACHE = {}
+
+def save_prompt_cache():
+    """Save prompt cache to file"""
+    try:
+        with open(CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(PROMPT_CACHE, f, indent=2)
+    except Exception as e:
+        print(f"[QwenVL] Failed to save prompt cache: {e}")
+
+def get_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None):
+    """Generate cache key from inputs"""
+    key_data = {
+        "model": model_name,
+        "preset": preset_prompt,
+        "custom": custom_prompt.strip() if custom_prompt else "",
+        "image": image_hash,
+        "video": video_hash,
+        "seed": seed  # Always include seed to ensure proper caching behavior
+    }
+    # Create deterministic hash
+    key_str = json.dumps(key_data, sort_keys=True)
+    return hashlib.md5(key_str.encode()).hexdigest()
+
+def get_alternative_cache_key(model_name, preset_prompt, custom_prompt, image_hash=None, video_hash=None, seed=None, module_name="QwenVL"):
+    """Generate alternative cache key for fixed seed mode to find random prompts"""
+    # Only for fixed seed mode (when user wants consistent prompts)
+    # We consider any seed that the user keeps fixed as "fixed seed mode"
+
+    # Try to find any cached prompt with same model/preset/custom/image but different seed
+    for cached_key, cached_data in PROMPT_CACHE.items():
+        cached_model = cached_data.get("model")
+        cached_preset = cached_data.get("preset")
+        cached_seed = cached_data.get("seed")
+
+        if (cached_model == model_name and
+            cached_preset == preset_prompt and
+            cached_seed != seed):  # Different seed
+
+            # Generate the cache key that would have been created for this cached data
+            # to check if image/image2 hashes match
+            cached_image_hash = cached_data.get("image_hash")
+            cached_video_hash = cached_data.get("video_hash")
+
+            # If the cached data doesn't have hash info, try to match by other criteria
+            if cached_image_hash is None and cached_video_hash is None:
+                # Fallback: if both current and cached have no image/image2, consider it a match
+                if image_hash is None and video_hash is None:
+                    return cached_key
+            else:
+                # Match if hashes are the same (including None)
+                if cached_image_hash == image_hash and cached_video_hash == video_hash:
+                    return cached_key
+    return None
+
+def ensure_cuda_vram_headroom(module_name="QwenVL", min_free_gb=1.0, min_free_ratio=0.08):
+    if not torch.cuda.is_available():
+        return True
+    try:
+        torch.cuda.synchronize()
+    except Exception:
+        pass
+    try:
+        free_before, total = torch.cuda.mem_get_info()
+    except Exception:
+        gc.collect()
+        torch.cuda.empty_cache()
+        return True
+
+    allocated = torch.cuda.memory_allocated()
+    reserved = torch.cuda.memory_reserved()
+    reclaimable = max(reserved - allocated, 0)
+    threshold = max(int(min_free_gb * 1024**3), int(total * min_free_ratio))
+
+    if free_before >= threshold and reclaimable < 512 * 1024**2:
+        return True
+
+    print(
+        f"[{module_name}] VRAM headroom low before run: "
+        f"free={free_before / 1024**3:.2f}GB, "
+        f"reserved={reserved / 1024**3:.2f}GB, "
+        f"allocated={allocated / 1024**3:.2f}GB. Cleaning CUDA cache..."
+    )
+    gc.collect()
+    torch.cuda.empty_cache()
+    try:
+        torch.cuda.ipc_collect()
+    except Exception:
+        pass
+    try:
+        torch.cuda.synchronize()
+    except Exception:
+        pass
+
+    try:
+        free_after, _ = torch.cuda.mem_get_info()
+        print(f"[{module_name}] VRAM after cleanup: free={free_after / 1024**3:.2f}GB")
+        return free_after >= threshold
+    except Exception:
+        return True
+
+def tensor_to_pil(tensor):
+    """Convert tensor to PIL Image with memory optimization"""
+    if tensor is None:
+        return None
+    try:
+        if tensor.dim() == 4:
+            tensor = tensor[0]
+        
+        # More aggressive memory management
+        if tensor.is_floating_point():
+            # Scale to 0-255 range more efficiently
+            tensor = tensor.clamp(0, 1)
+        
+        # Reduce sample size for memory efficiency
+        array = tensor.cpu().numpy()
+        if tensor.numel() > 0:
+            # Take smaller sample for hash to save memory
+            sample_size = min(50, tensor.numel() // 4)  # Reduced from 100
+            sample_pixels = array.flatten()[:sample_size].tolist() if array.size > 0 else []
+        else:
+            sample_pixels = []
+        
+        content = f"{tensor.shape}_{tensor.dtype}_{sample_pixels[:10]}"
+        return hashlib.md5(content.encode()).hexdigest()[:16]
+    except:
+        return None
+
+def get_image_hash(image):
+    """Generate hash for image tensor"""
+    if image is None:
+        return None
+    try:
+        # Use image tensor properties for hash
+        shape = str(image.shape)
+        dtype = str(image.dtype)
+        # Sample a few pixels for content hash (avoid full tensor for performance)
+        if len(image.shape) >= 3:
+            sample_pixels = image.flatten()[:100].tolist() if image.numel() > 0 else []
+        else:
+            sample_pixels = image.flatten().tolist() if image.numel() > 0 else []
+        
+        content = f"{shape}_{dtype}_{sample_pixels[:10]}"  # Limit sample size
+        return hashlib.md5(content.encode()).hexdigest()[:16]
+    except:
+        return None
+
+def get_video_hash(video):
+    """Generate hash for video tensor (same as image)"""
+    return get_image_hash(video)
+
+
+def load_video_frames(video_path, frame_count=16):
+    """Decode a video file to a frame batch tensor [N, H, W, C] float 0-1.
+
+    Tries decord first (fast, GPU-friendly), falls back to OpenCV.
+    Frames are uniformly sampled so frame_count controls the output size.
+    """
+    video_path = str(video_path).strip().strip('"').strip("'")
+    if not video_path:
+        return None
+    if not os.path.exists(video_path):
+        raise FileNotFoundError(f"[QwenVL] video_path not found: {video_path}")
+
+    frames = None
+    try:
+        import decord
+        vr = decord.VideoReader(video_path)
+        n = len(vr)
+        if n == 0:
+            raise ValueError(f"[QwenVL] video has no decodable frames: {video_path}")
+        idx = np.linspace(0, n - 1, min(frame_count, n), dtype=int)
+        frames = vr.get_batch(idx).asnumpy()  # [N, H, W, 3] uint8
+        print(f"[QwenVL] Decoded {len(frames)}/{n} frames via decord from {os.path.basename(video_path)}")
+    except ImportError:
+        import cv2
+        cap = cv2.VideoCapture(video_path)
+        if not cap.isOpened():
+            raise ValueError(f"[QwenVL] Could not open video: {video_path}")
+        total = int(cap.get(cv2.CAP_PROP_FRAME_COUNT)) or 0
+        wanted = set(np.linspace(0, max(total - 1, 0), min(frame_count, max(total, 1)), dtype=int).tolist())
+        collected, i = [], 0
+        while True:
+            ok, f = cap.read()
+            if not ok:
+                break
+            if i in wanted:
+                collected.append(cv2.cvtColor(f, cv2.COLOR_BGR2RGB))
+            i += 1
+        cap.release()
+        if not collected:
+            raise ValueError(f"[QwenVL] No frames decoded from: {video_path}")
+        frames = np.stack(collected)
+        print(f"[QwenVL] Decoded {len(frames)} frames via OpenCV from {os.path.basename(video_path)}")
+
+    return torch.from_numpy(frames).float() / 255.0
+
+
+# Load cache on module import
+load_prompt_cache()
+try:
+    from transformers import AutoModelForVision2Seq
+except ImportError:
+    from transformers import AutoModelForImageTextToText as AutoModelForVision2Seq
+
+# Export memory functions for external use
+__all__ = ['PROMPT_CACHE', 'get_cache_key', 'get_alternative_cache_key', 'save_prompt_cache', 'get_image_hash', 'get_video_hash', 'check_pytorch_memory', 'set_pytorch_memory_fraction', 'get_device_info', 'tensor_to_pil', 'get_video_hash', 'enforce_memory', 'quantization_config', 'ensure_model', 'resolve_attention_mode', 'flash_attn_available', 'normalize_device_choice', 'load_model_configs', 'HF_VL_MODELS', 'HF_TEXT_MODELS', 'HF_ALL_MODELS', 'SYSTEM_PROMPTS', 'PRESET_PROMPTS', 'TOOLTIPS', 'Quantization', 'ATTENTION_MODES', 'NODE_CLASS_MAPPINGS', 'NODE_DISPLAY_NAME_MAPPINGS']
+
+import folder_paths
+
+NODE_DIR = Path(__file__).parent
+CONFIG_PATH = NODE_DIR / "hf_models.json"
+SYSTEM_PROMPTS_PATH = NODE_DIR / "AILab_System_Prompts.json"
+HF_VL_MODELS: dict[str, dict] = {}
+HF_TEXT_MODELS: dict[str, dict] = {}
+HF_ALL_MODELS: dict[str, dict] = {}
+SYSTEM_PROMPTS = {}
+PRESET_PROMPTS: list[str] = ["Describe this image in detail."]
+
+TOOLTIPS = {
+    "model_name": "Pick the Qwen-VL checkpoint. First run downloads weights into models/LLM/Qwen-VL, so leave disk space.",
+    "quantization": "Precision vs VRAM. FP16 gives the best quality if memory allows; 8-bit suits 8–16 GB GPUs; 4-bit fits 6 GB or lower but is slower.",
+    "attention_mode": "auto tries SageAttention → FlashAttention 2 → SDPA in order. SDPA is stable and recommended. Only override when debugging attention backends.",
+    "preset_prompt": "Built-in instruction describing how Qwen-VL should analyze the media input.",
+    "custom_prompt": "Additional user input that gets combined with the preset template. Leave empty to use only the template.",
+    "max_tokens": "Maximum number of new tokens to decode. Larger values yield longer answers but consume more time and memory.",
+    "keep_model_loaded": "Keeps the model resident in VRAM/RAM after the run so the next prompt skips loading.",
+    "seed": "Seed controlling sampling and frame picking; reuse it to reproduce results.",
+    "use_torch_compile": "Enable torch.compile('reduce-overhead') on supported CUDA/Torch 2.1+ builds for extra throughput after the first compile.",
+    "device": "Choose where to run the model: auto, cpu, mps, or cuda:x for multi-GPU systems.",
+    "temperature": "Sampling randomness when num_beams == 1. 0.2–0.4 is focused, 0.7+ is creative.",
+    "top_p": "Nucleus sampling cutoff when num_beams == 1. Lower values keep only top tokens; 0.9–0.95 allows more variety.",
+    "num_beams": "Beam-search width. Values >1 disable temperature/top_p and trade speed for more stable answers.",
+    "repetition_penalty": "Values >1 (e.g., 1.1–1.3) penalize repeated phrases; 1.0 leaves logits untouched.",
+    "frame_count": "Number of frames to sample from the video input. Only applies to the video input, NOT to image/image2.",
+}
+
+class Quantization(str, Enum):
+    Q4 = "4-bit (VRAM-friendly)"
+    Q8 = "8-bit (Balanced)"
+    FP16 = "None (FP16)"
+
+    @classmethod
+    def get_values(cls):
+        return [item.value for item in cls]
+
+    @classmethod
+    def from_value(cls, value):
+        for item in cls:
+            if item.value == value:
+                return item
+        raise ValueError(f"Unsupported quantization: {value}")
+
+def load_model_configs():
+    global HF_VL_MODELS, HF_TEXT_MODELS, HF_ALL_MODELS, SYSTEM_PROMPTS, PRESET_PROMPTS
+    try:
+        with open(CONFIG_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh) or {}
+        if "hf_vl_models" in data or "hf_text_models" in data:
+            HF_VL_MODELS = data.get("hf_vl_models") or {}
+            HF_TEXT_MODELS = data.get("hf_text_models") or {}
+        else:
+            HF_VL_MODELS = {k: v for k, v in data.items() if not k.startswith("_")}
+            HF_TEXT_MODELS = {}
+        SYSTEM_PROMPTS = data.get("_system_prompts", {})
+        PRESET_PROMPTS = data.get("_preset_prompts", PRESET_PROMPTS)
+    except Exception as exc:
+        print(f"[QwenVL] Config load failed: {exc}")
+        HF_VL_MODELS = {}
+        HF_TEXT_MODELS = {}
+        HF_ALL_MODELS = {}
+        SYSTEM_PROMPTS = {}
+    try:
+        with open(SYSTEM_PROMPTS_PATH, "r", encoding="utf-8") as fh:
+            data = json.load(fh) or {}
+        qwenvl_prompts = data.get("qwenvl") or {}
+        preset_override = data.get("_preset_prompts") or []
+        if isinstance(qwenvl_prompts, dict) and qwenvl_prompts:
+            SYSTEM_PROMPTS = qwenvl_prompts
+        if isinstance(preset_override, list) and preset_override:
+            PRESET_PROMPTS = preset_override
+    except FileNotFoundError:
+        pass
+    except Exception as exc:
+        print(f"[QwenVL] System prompts load failed: {exc}")
+    custom = NODE_DIR / "custom_models.json"
+    if custom.exists():
+        try:
+            with open(custom, "r", encoding="utf-8") as fh:
+                data = json.load(fh) or {}
+            custom_vl = data.get("hf_vl_models") or {}
+            custom_text = data.get("hf_text_models") or {}
+            legacy = data.get("hf_models", {}) or data.get("models", {})
+            if isinstance(custom_vl, dict) and custom_vl:
+                HF_VL_MODELS.update(custom_vl)
+                print(f"[QwenVL] Loaded {len(custom_vl)} custom VL models")
+            if isinstance(custom_text, dict) and custom_text:
+                HF_TEXT_MODELS.update(custom_text)
+                print(f"[QwenVL] Loaded {len(custom_text)} custom text models")
+            if isinstance(legacy, dict) and legacy:
+                HF_VL_MODELS.update(legacy)
+                print(f"[QwenVL] Loaded {len(legacy)} custom legacy models")
+        except Exception as exc:
+            print(f"[QwenVL] custom_models.json skipped: {exc}")
+    HF_ALL_MODELS = dict(HF_VL_MODELS)
+    HF_ALL_MODELS.update(HF_TEXT_MODELS)
+
+    # Scan local models directory for HF models not in JSON config
+    _scan_local_hf_models()
+
+
+def _scan_local_hf_models():
+    """Scan all LLM/Qwen-VL directories for locally available HF models not already in the config."""
+    global HF_VL_MODELS, HF_ALL_MODELS
+
+    # Collect all Qwen-VL directories to scan from ComfyUI's multi-path system
+    scan_dirs: list[Path] = []
+    llm_paths = folder_paths.get_folder_paths("LLM") if "LLM" in folder_paths.folder_names_and_paths else []
+    for llm_path in llm_paths:
+        qwen_dir = Path(llm_path) / "Qwen-VL"
+        if qwen_dir not in scan_dirs:
+            scan_dirs.append(qwen_dir)
+    # Always include the default location as fallback
+    default_dir = Path(folder_paths.models_dir) / "LLM" / "Qwen-VL"
+    if default_dir not in scan_dirs:
+        scan_dirs.append(default_dir)
+
+    # Collect known local directory names from JSON config
+    known_dirs = set()
+    for info in HF_ALL_MODELS.values():
+        repo_id = info.get("repo_id", "")
+        if isinstance(repo_id, str) and "/" in repo_id:
+            known_dirs.add(repo_id.split("/")[-1])
+        local_path = info.get("local_path")
+        if local_path:
+            known_dirs.add(Path(local_path).name)
+
+    count = 0
+    for models_dir in scan_dirs:
+        if not models_dir.exists() or not models_dir.is_dir():
+            continue
+        try:
+            for entry in models_dir.iterdir():
+                if not entry.is_dir():
+                    continue
+                if entry.name in known_dirs:
+                    continue
+                # Check if the directory contains model weights
+                has_weights = any(entry.glob("*.safetensors")) or any(entry.glob("*.bin"))
+                if not has_weights:
+                    continue
+                display = f"[local] {entry.name}"
+                model_info = {
+                    "local_path": str(entry),
+                    "repo_id": None,
+                    "is_local": True,
+                    "quantized": False,
+                }
+                HF_VL_MODELS[display] = model_info
+                HF_ALL_MODELS[display] = model_info
+                known_dirs.add(entry.name)
+                count += 1
+        except PermissionError:
+            pass
+
+    if count:
+        print(f"[QwenVL] Discovered {count} local HF model(s) on disk")
+
+
+if not HF_ALL_MODELS:
+    load_model_configs()
+
+
+def read_hf_model_type(model_dir: str) -> str | None:
+    """Read model_type from a HuggingFace model's config.json."""
+    try:
+        config_path = Path(model_dir) / "config.json"
+        if config_path.exists():
+            with open(config_path, "r", encoding="utf-8") as f:
+                config = json.load(f)
+            return config.get("model_type")
+    except Exception:
+        pass
+    return None
+
+def check_pytorch_memory():
+    """Check current PyTorch memory settings and allow user to set fraction"""
+    try:
+        import torch
+        print(f"[QwenVL] PyTorch {torch.__version__}")
+        print(f"[QwenVL] CUDA Available: {torch.cuda.is_available()}")
+        
+        if torch.cuda.is_available():
+            current_fraction = torch.cuda.get_per_process_memory_fraction()
+            print(f"[QwenVL] Current Memory Fraction: {current_fraction:.3f} ({current_fraction*100:.1f}% of GPU)")
+            print(f"[QwenVL] GPU Memory: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
+            
+            # Allow user to set new fraction
+            try:
+                prompt = f"[QwenVL] Enter new memory fraction (0.1-0.9"
+                if current_fraction is not None:
+                    prompt += f", current={current_fraction:.3f})"
+                new_fraction = float(input(prompt + ": ") or current_fraction)
+                if 0.1 <= new_fraction <= 0.9:
+                    torch.cuda.set_per_process_memory_fraction(new_fraction)
+                    print(f"[QwenVL] ✅ Memory fraction set to: {new_fraction:.3f} ({new_fraction*100:.1f}%)")
+                else:
+                    print(f"[QwenVL] ❌ Invalid fraction. Must be between 0.1 and 0.9")
+            except KeyboardInterrupt:
+                print(f"[QwenVL] ✅ Keeping current fraction: {current_fraction:.3f}")
+            except Exception as e:
+                print(f"[QwenVL] ❌ Error setting fraction: {e}")
+        else:
+            print("[QwenVL] CUDA not available")
+    except Exception as e:
+        print(f"[QwenVL] Error checking PyTorch: {e}")
+
+def set_pytorch_memory_fraction(fraction):
+    """Set PyTorch memory fraction if CUDA is available"""
+    try:
+        import torch
+        if torch.cuda.is_available():
+            if 0.1 <= fraction <= 0.9:
+                torch.cuda.set_per_process_memory_fraction(fraction)
+                print(f"[QwenVL] Memory fraction set to: {fraction:.3f} ({fraction*100:.1f}%)")
+                return True
+            else:
+                print(f"[QwenVL] Invalid fraction: {fraction:.3f}. Must be between 0.1 and 0.9")
+                return False
+        else:
+            print("[QwenVL] CUDA not available")
+            return False
+    except Exception as e:
+        print(f"[QwenVL] Error: {e}")
+        return False
+
+def get_device_info():
+    gpu = {"available": False, "total_memory": 0, "free_memory": 0}
+    device_type = "cpu"
+    recommended = "cpu"
+    if torch.cuda.is_available():
+        props = torch.cuda.get_device_properties(0)
+        total = props.total_memory / 1024**3
+        allocated = torch.cuda.memory_allocated(0) / 1024**3
+        reserved = torch.cuda.memory_reserved(0) / 1024**3
+        free = total - allocated - reserved
+        
+        gpu = {
+            "available": True,
+            "total_memory": total,
+            "allocated_memory": allocated,
+            "reserved_memory": reserved, 
+            "free_memory": free,
+        }
+        device_type = "nvidia_gpu"
+        recommended = "cuda"
+        
+        # Detailed memory debugging
+        print(f"[QwenVL] GPU Memory Debug:")
+        print(f"  Total VRAM: {total / 1024**3:.2f} GB")
+        print(f"  Allocated: {allocated / 1024**3:.2f} GB")  
+        print(f"  Reserved: {reserved / 1024**3:.2f} GB")
+        print(f"  Free: {free / 1024**3:.2f} GB")
+        print(f"  Model requires: 0.74 GB")
+        print(f"  Available ratio: {(free / total) * 100:.1f}%")
+        
+    elif getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+        device_type = "apple_silicon"
+        recommended = "mps"
+        gpu = {"available": True, "total_memory": 0, "free_memory": 0}
+    sys_mem = psutil.virtual_memory()
+    return {
+        "gpu": gpu,
+        "system_memory": {
+            "total": sys_mem.total / 1024**3,
+            "available": sys_mem.available / 1024**3,
+        },
+        "device_type": device_type,
+        "recommended_device": recommended,
+    }
+
+def normalize_device_choice(device: str) -> str:
+    device = (device or "auto").strip()
+    if device == "auto":
+        return "auto"
+
+    if device.isdigit():
+        device = f"cuda:{int(device)}"
+
+    if device == "cuda":
+        if not torch.cuda.is_available():
+            print("[QwenVL] CUDA requested but not available, falling back to CPU")
+            return "cpu"
+        return "cuda"
+
+    if device.startswith("cuda"):
+        if not torch.cuda.is_available():
+            print("[QwenVL] CUDA requested but not available, falling back to CPU")
+            return "cpu"
+        if ":" in device:
+            try:
+                device_idx = int(device.split(":", 1)[1])
+                if device_idx >= torch.cuda.device_count():
+                    print(f"[QwenVL] CUDA device {device_idx} not available, using cuda:0")
+                    return "cuda:0"
+            except (ValueError, IndexError):
+                print(f"[QwenVL] Invalid CUDA device format '{device}', using cuda:0")
+                return "cuda:0"
+        return device
+
+    if device == "mps":
+        if not (getattr(torch.backends, "mps", None) and torch.backends.mps.is_available()):
+            print("[QwenVL] MPS requested but not available, falling back to CPU")
+            return "cpu"
+        return "mps"
+
+    return device
+
+def flash_attn_available():
+    if not torch.cuda.is_available():
+        return False
+
+    major, _ = torch.cuda.get_device_capability()
+    if major < 8:
+        return False
+
+    try:
+        import flash_attn  # noqa: F401
+    except Exception:
+        return False
+
+    try:
+        import importlib.metadata as importlib_metadata
+        _ = importlib_metadata.version("flash_attn")
+    except Exception:
+        return False
+
+    return True
+
+def sage_attn_available():
+    """Check if SageAttention is available and GPU supports it."""
+    if not SAGE_ATTENTION_AVAILABLE:
+        return False
+    if not torch.cuda.is_available():
+        return False
+    major, _ = torch.cuda.get_device_capability()
+    if major < 8:
+        return False
+    return True
+
+
+def get_sage_attention_config():
+    """Get the appropriate SageAttention kernel based on GPU architecture."""
+    if not sage_attn_available():
+        return None, None, None
+
+    major, minor = torch.cuda.get_device_capability()
+    arch_code = major * 10 + minor
+
+    attn_func = None
+    pv_accum_dtype = "fp32"
+
+    if arch_code >= 120:  # Blackwell
+        pv_accum_dtype = "fp32+fp32"
+        attn_func = sageattn_qk_int8_pv_fp8_cuda
+        print(f"[QwenVL] SageAttention: Using SM120 (Blackwell) FP8 kernel")
+    elif arch_code >= 90:  # Hopper
+        pv_accum_dtype = "fp32+fp32"
+        attn_func = sageattn_qk_int8_pv_fp8_cuda_sm90
+        print(f"[QwenVL] SageAttention: Using SM90 (Hopper) FP8 kernel")
+    elif arch_code == 89:  # Ada Lovelace
+        pv_accum_dtype = "fp32+fp32"
+        attn_func = sageattn_qk_int8_pv_fp8_cuda
+        print(f"[QwenVL] SageAttention: Using SM89 (Ada) FP8 kernel")
+    elif arch_code >= 80:  # Ampere
+        pv_accum_dtype = "fp32"
+        attn_func = sageattn_qk_int8_pv_fp16_cuda
+        print(f"[QwenVL] SageAttention: Using SM80+ (Ampere) FP16 kernel")
+    else:
+        print(f"[QwenVL] SageAttention not supported on SM{arch_code}")
+        return None, None, None
+
+    return attn_func, "per_warp", pv_accum_dtype
+
+def is_fp8_model(model_name: str) -> bool:
+    """Check if model name indicates it's a pre-quantized FP8 model."""
+    fp8_indicators = ["-fp8", "_fp8", "-FP8", "_FP8"]
+    return any(indicator in model_name for indicator in fp8_indicators)
+
+def resolve_attention_mode(mode, force_sdpa=False):
+    """Resolve attention mode with fallback logic.
+
+    Args:
+        mode: The requested attention mode
+        force_sdpa: If True, always return SDPA (for FP8/BnB models)
+    """
+    if force_sdpa:
+        return "sdpa"
+
+    if mode == "sdpa":
+        return "sdpa"
+    if mode == "sage":
+        if sage_attn_available():
+            return "sage"
+        print("[QwenVL] SageAttention forced but unavailable, falling back to SDPA")
+        return "sdpa"
+    if mode == "flash_attention_2":
+        if flash_attn_available():
+            return "flash_attention_2"
+        print("[QwenVL] Flash-Attn forced but unavailable, falling back to SDPA")
+        return "sdpa"
+
+    # Auto mode: try sage → flash → sdpa
+    if sage_attn_available():
+        print("[QwenVL] Auto mode: Using SageAttention")
+        return "sage"
+    if flash_attn_available():
+        print("[QwenVL] Auto mode: Using Flash Attention 2")
+        return "flash_attention_2"
+    print("[QwenVL] Auto mode: Using SDPA")
+    return "sdpa"
+
+def ensure_model(model_name):
+    info = HF_ALL_MODELS.get(model_name)
+    if not info:
+        raise ValueError(f"Model '{model_name}' not in config")
+
+    # Local models have a direct path — use it, skip download
+    local_path = info.get("local_path")
+    if local_path:
+        target = Path(local_path)
+        if target.exists() and target.is_dir():
+            return str(target)
+        raise FileNotFoundError(f"[QwenVL] Local HF model directory not found: {target}")
+
+    repo_id = info.get("repo_id")
+    if not repo_id:
+        raise ValueError(f"Model '{model_name}' has no repo_id or local_path")
+
+    # Use ComfyUI's multi-path system if available
+    llm_paths = folder_paths.get_folder_paths("LLM") if "LLM" in folder_paths.folder_names_and_paths else []
+    if llm_paths:
+        models_dir = Path(llm_paths[0]) / "Qwen-VL"
+    else:
+        # Fallback to default behavior
+        models_dir = Path(folder_paths.models_dir) / "LLM" / "Qwen-VL"
+
+    models_dir.mkdir(parents=True, exist_ok=True)
+    target = models_dir / repo_id.split("/")[-1]
+
+    # If already downloaded (has weights), use local without calling snapshot_download
+    if target.exists() and target.is_dir():
+        if any(target.glob("*.safetensors")) or any(target.glob("*.bin")):
+            return str(target)
+
+    snapshot_download(
+        repo_id=repo_id,
+        local_dir=str(target),
+        ignore_patterns=["*.md", ".git*"],
+    )
+
+    # Some community uploads (e.g. heretic/abliterated variants) forget to include
+    # preprocessor_config.json even though the model is multimodal. Without it
+    # AutoProcessor fails with "Can't load image processor". Detect the missing
+    # file and fetch it from the official Qwen3.5 repo so VL inference works.
+    preproc_path = target / "preprocessor_config.json"
+    if not preproc_path.exists():
+        config_path = target / "config.json"
+        needs_vision = False
+        if config_path.exists():
+            try:
+                import json as _json
+                with open(config_path) as _f:
+                    _cfg = _json.load(_f)
+                needs_vision = "vision_config" in _cfg
+            except Exception:
+                pass
+        if needs_vision:
+            # Pick the right base model for preprocessor config
+            model_lower = model_name.lower() if model_name else ""
+            if "3.8" in model_lower or "qwen3.8" in model_lower:
+                base_repo = "Qwen/Qwen3.8-27B"
+            elif "27b" in model_lower or "qwen3.5-27b" in model_lower:
+                base_repo = "Qwen/Qwen3.5-27B"
+            elif "9b" in model_lower:
+                base_repo = "Qwen/Qwen3.5-9B"
+            else:
+                base_repo = "Qwen/Qwen3.5-4B"
+            print(f"[QwenVL] preprocessor_config.json missing — downloading from {base_repo}")
+            try:
+                hf_hub_download(
+                    repo_id=base_repo,
+                    filename="preprocessor_config.json",
+                    local_dir=str(target),
+                )
+            except Exception as e:
+                print(f"[QwenVL] Could not fetch preprocessor_config.json: {e}")
+
+    return str(target)
+
+def enforce_memory(model_name, quantization, device_info):
+    info = HF_ALL_MODELS.get(model_name, {})
+    requirements = info.get("vram_requirement", {})
+    mapping = {
+        Quantization.Q4: requirements.get("4bit", 0),
+        Quantization.Q8: requirements.get("8bit", 0),
+        Quantization.FP16: requirements.get("full", 0),
+    }
+    needed = mapping.get(quantization, 0)
+    if not needed:
+        return quantization  # Always return quantization
+    
+    if device_info["recommended_device"] in {"cpu", "mps"}:
+        needed *= 1.5
+        available = device_info["system_memory"]["available"]
+    else:
+        available = device_info["gpu"]["free_memory"]
+    
+    # More conservative memory management
+    if needed * 1.5 > available:  # More conservative threshold
+        if quantization == Quantization.FP16:
+            print("[QwenVL] ⚠️  Auto-switch to 8-bit due to VRAM pressure")
+            return Quantization.Q8
+        if quantization == Quantization.Q8:
+            print("[QwenVL] ⚠️  Auto-switch to 4-bit due to VRAM pressure")
+            return Quantization.Q4
+        raise RuntimeError(f"Insufficient memory for {quantization.value} mode. Required: {needed * 1.5:.1f}GB, Available: {available / 1024**3:.1f}GB")
+    
+    # Conservative memory check with safety margin
+    if needed * 1.3 > available:  # Reduced from 1.5 to 1.3
+        if quantization == Quantization.FP16:
+            print("[QwenVL] ⚠️  Auto-switch to 8-bit due to VRAM pressure")
+            return Quantization.Q8
+        if quantization == Quantization.Q8:
+            print("[QwenVL] ⚠️  Auto-switch to 4-bit due to VRAM pressure")
+            return Quantization.Q4
+        print(f"[QwenVL] Memory pressure detected. Consider: 1) Use 4-bit quantization, 2) Reduce max_tokens below 1024, 3) Close other applications")
+        return quantization  # Always return quantization
+
+def quantization_config(model_name, quantization):
+    info = HF_ALL_MODELS.get(model_name, {})
+    if info.get("quantized"):
+        return None, None
+    if quantization == Quantization.Q4:
+        cfg = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16,
+            bnb_4bit_quant_type="nf4",
+            bnb_4bit_use_double_quant=True,
+        )
+        return cfg, None
+    if quantization == Quantization.Q8:
+        return BitsAndBytesConfig(load_in_8bit=True), None
+    return None, torch.float16 if torch.cuda.is_available() else torch.float32
+
+class QwenVLBase:
+    def __init__(self):
+        self.device_info = get_device_info()
+        self.model = None
+        self.processor = None
+        self.tokenizer = None
+        self.current_signature = None
+        print(f"[QwenVL] Node on {self.device_info['device_type']}")
+
+    def clear(self):
+        self.model = None
+        self.processor = None
+        self.tokenizer = None
+        self.current_signature = None
+        gc.collect()
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            try:
+                torch.cuda.ipc_collect()
+            except Exception:
+                pass
+
+    def load_model(
+        self,
+        model_name,
+        quant_value,
+        attention_mode,
+        use_compile,
+        device_choice,
+        keep_model_loaded,
+    ):
+        quant = Quantization.from_value(quant_value)  # Skip enforce_memory for now
+        
+        # Safety check: ensure quant is not None
+        if quant is None:
+            print(f"[QwenVL] Invalid quantization value: {quant_value}, falling back to FP16")
+            quant = Quantization.FP16
+        
+        # Check if BitsAndBytes quantization is being used
+        is_bnb_quantization = quant in [Quantization.Q4, Quantization.Q8]
+        
+        # Check if this is a pre-quantized FP8 model
+        is_prequantized_fp8 = is_fp8_model(model_name) or HF_ALL_MODELS.get(model_name, {}).get("quantized", False)
+        
+        # Determine if we need to force SDPA (for FP8 or BitsAndBytes models)
+        force_sdpa = is_prequantized_fp8 or is_bnb_quantization
+        
+        # Resolve attention mode with force_sdpa flag
+        attn_impl = resolve_attention_mode(attention_mode, force_sdpa=force_sdpa)
+        
+        # Additional info messages for forced SDPA
+        if force_sdpa and attention_mode in ["auto", "sage", "flash_attention_2"]:
+            if is_prequantized_fp8:
+                print("[QwenVL] FP8 model detected - forcing SDPA attention")
+            elif is_bnb_quantization:
+                print("[QwenVL] BitsAndBytes quantization detected - forcing SDPA attention")
+        
+        print(f"[QwenVL] Attention backend selected: {attn_impl}")
+        
+        device_requested = self.device_info["recommended_device"] if device_choice == "auto" else device_choice
+        device = normalize_device_choice(device_requested)
+        signature = (model_name, quant.value, attn_impl, device, use_compile)
+        if keep_model_loaded and self.model is not None and self.current_signature == signature:
+            ensure_cuda_vram_headroom("QwenVL", min_free_gb=1.0, min_free_ratio=0.08)
+            return
+        self.clear()
+        model_path = ensure_model(model_name)
+        quant_config, dtype = quantization_config(model_name, quant)
+        
+        # Handle attention mode for loading
+        # SageAttention requires loading with SDPA first, then patching
+        actual_attn_impl = attn_impl
+        if attn_impl == "sage":
+            actual_attn_impl = "sdpa"
+        
+        # MEMORY DEBUGGING: Check memory before loading
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            allocated_before = torch.cuda.memory_allocated() / 1024**3
+            reserved_before = torch.cuda.memory_reserved() / 1024**3
+            total_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"[QwenVL] 📊 Memory BEFORE load - Allocated: {allocated_before:.1f}GB, Reserved: {reserved_before:.1f}GB, Total: {total_memory:.1f}GB")
+            
+            # Check what's using memory
+            if allocated_before > 2.0:
+                print(f"[QwenVL] ⚠️  WARNING: {allocated_before:.1f}GB already allocated before loading!")
+        
+        # DEBUG: Print quantization config details
+        print(f"[QwenVL] 🔍 DEBUG - Model: {model_name}, Quant: {quant}, Quant config: {quant_config}")
+        print(f"[QwenVL] 🔍 DEBUG - Device: {device}, Dtype: {dtype}")
+        print(f"[QwenVL] 🔍 DEBUG - Attention impl: {actual_attn_impl}")
+        
+        # Quantization is back - enforce_memory was the problem
+
+        # BitsAndBytes-quantized models are dispatched by accelerate and CANNOT
+        # be created on CPU then moved via .to(device). They must be loaded
+        # directly onto a GPU through device_map. FP16/FP32 paths can keep the
+        # old "load on CPU, move to device" behavior, which is friendlier to
+        # tight VRAM during the initial weight materialization.
+        if quant_config is not None and device == "cpu":
+            print("[QwenVL] ⚠️  BitsAndBytes requires a CUDA/ROCm GPU — falling back to FP16/FP32 on CPU")
+            quant_config = None
+            quant = Quantization.FP16
+
+        # Patch: some Qwen3-VL configs have rope_scaling=None which crashes
+        # transformers. Applies to both BnB and FP16/FP32 paths.
+        # NOTE: qwen3_5 is a NEW hybrid architecture (linear+full attention)
+        # supported natively only by transformers>=5.2.0. It must NOT be
+        # aliased to qwen3_vl: the architectures are different and the load
+        # fails or produces a broken model.
+        import json
+        from pathlib import Path
+
+        cfg_path = Path(model_path) / "config.json"
+        try:
+            # Repair configs corrupted by an earlier qwen3_5->qwen3_vl
+            # aliasing attempt written to disk.
+            if cfg_path.exists():
+                cfg_dict = json.loads(cfg_path.read_text())
+                archs = " ".join(str(a) for a in cfg_dict.get("architectures", []))
+                if cfg_dict.get("model_type") == "qwen3_vl" and "Qwen3_5" in archs:
+                    cfg_dict["model_type"] = "qwen3_5_moe" if "Moe" in archs else "qwen3_5"
+                    cfg_path.write_text(json.dumps(cfg_dict, indent=2))
+                    print(f"[QwenVL] Restored config.json model_type -> {cfg_dict['model_type']}")
+        except Exception as e:
+            print(f"[QwenVL] config.json repair check skipped: {e}")
+
+        config_patch = {}
+        try:
+            from transformers import AutoConfig
+            cfg = AutoConfig.from_pretrained(model_path, trust_remote_code=True)
+            if hasattr(cfg, "text_config") and getattr(cfg.text_config, "rope_scaling", "missing") is None:
+                cfg.text_config.rope_scaling = {"rope_type": "default", "mrope_section": [24, 20, 20], "mrope_interleaved": True}
+                config_patch["config"] = cfg
+                print("[QwenVL] Patched rope_scaling=None in text_config")
+            elif getattr(cfg, "rope_scaling", "missing") is None:
+                cfg.rope_scaling = {"rope_type": "default", "mrope_section": [24, 20, 20], "mrope_interleaved": True}
+                config_patch["config"] = cfg
+                print("[QwenVL] Patched rope_scaling=None in config")
+        except (ValueError, KeyError) as e:
+            model_type = ""
+            try:
+                if cfg_path.exists():
+                    model_type = json.loads(cfg_path.read_text()).get("model_type", "")
+            except Exception:
+                pass
+            if model_type.startswith(("qwen3_5", "qwen3.5")):
+                raise ValueError(
+                    f"Model '{model_name}' uses the '{model_type}' architecture, which "
+                    "requires transformers>=5.2.0 (this environment has an older "
+                    "release). Upgrade transformers or use the GGUF variant of this model."
+                ) from e
+            print(f"[QwenVL] rope_scaling pre-check skipped: {e}")
+        except Exception as e:
+            print(f"[QwenVL] rope_scaling pre-check skipped: {e}")
+
+        if quant_config is not None:
+            # Bnb path: hand the model directly to the target device.
+            bnb_device_map = device if device.startswith("cuda") else "auto"
+            load_kwargs = {
+                "device_map": bnb_device_map,
+                "quantization_config": quant_config,
+                "attn_implementation": actual_attn_impl,
+                "use_safetensors": True,
+                "low_cpu_mem_usage": True,
+                **config_patch,
+            }
+            print(f"[QwenVL] 🔧 BnB load_kwargs device_map={bnb_device_map}")
+            self.model = AutoModelForVision2Seq.from_pretrained(model_path, **load_kwargs).eval()
+            print(f"[QwenVL] ✅ BitsAndBytes model loaded ({quant.value})")
+        else:
+            load_kwargs = {
+                "device_map": "cpu",  # Materialize on CPU first to limit VRAM spikes
+                "dtype": torch.float16,
+                "attn_implementation": actual_attn_impl,
+                "use_safetensors": True,
+                "low_cpu_mem_usage": True,
+                **config_patch,
+            }
+            self.model = AutoModelForVision2Seq.from_pretrained(model_path, **load_kwargs).eval()
+
+            if device != "cpu" and torch.cuda.is_available():
+                print(f"[QwenVL] 🔄 Moving model from CPU to {device}...")
+                try:
+                    self.model = self.model.to(device)
+                    print(f"[QwenVL] ✅ Model moved to {device}")
+                except Exception as e:
+                    print(f"[QwenVL] ❌ Failed to move to GPU: {e}")
+                    print("[QwenVL] Keeping model on CPU (will be very slow)")
+        
+        # Apply SageAttention patching if needed
+        if attn_impl == "sage":
+            try:
+                from sageattention_patch import set_sage_attention
+                set_sage_attention(self.model)
+                print("[QwenVL] SageAttention patching applied successfully")
+            except Exception as e:
+                print(f"[QwenVL] SageAttention patching failed: {e}")
+                print("[QwenVL] Falling back to SDPA attention")
+                # Model is already loaded with SDPA, so we can continue
+        
+        # MEMORY CLEANUP: Clear cache after model loading
+        if torch.cuda.is_available():
+            torch.cuda.empty_cache()
+            torch.cuda.synchronize()
+            print(f"[QwenVL] GPU memory after load: {torch.cuda.memory_allocated() / 1024**3:.1f}GB / {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f}GB")
+                
+        self.model.config.use_cache = True
+        if hasattr(self.model, "generation_config"):
+            self.model.generation_config.use_cache = True
+        if use_compile and device.startswith("cuda") and torch.cuda.is_available():
+            try:
+                self.model = torch.compile(self.model, mode="reduce-overhead")
+                print("[QwenVL] torch.compile enabled")
+            except Exception as exc:
+                print(f"[QwenVL] torch.compile skipped: {exc}")
+        self.processor = AutoProcessor.from_pretrained(model_path, trust_remote_code=True)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path, trust_remote_code=True)
+        # Detect Qwen3.x family from config.json instead of relying on model name
+        hf_model_type = read_hf_model_type(model_path)
+        name_lower = model_name.lower()
+        self.is_qwen35 = bool(
+            (hf_model_type and "qwen3" in hf_model_type)
+            or "qwen3" in name_lower
+        )
+        if self.is_qwen35:
+            print(f"[QwenVL] Qwen3 family detected (model_type={hf_model_type}): Will disable thinking via enable_thinking + /no_think.")
+        self.current_signature = signature
+
+    @staticmethod
+    def tensor_to_pil(tensor):
+        if tensor is None:
+            return None
+        if tensor.dim() == 4:
+            tensor = tensor[0]
+        array = (tensor.cpu().numpy() * 255).clip(0, 255).astype(np.uint8)
+        if array.ndim == 2:
+            return Image.fromarray(array, mode="L")
+        if array.shape[-1] == 1:
+            return Image.fromarray(array[..., 0], mode="L")
+        if array.shape[-1] == 4:
+            return Image.fromarray(array, mode="RGBA")
+        return Image.fromarray(array[..., :3], mode="RGB")
+
+    @torch.no_grad()
+    def generate(
+        self,
+        prompt_text,
+        image,
+        image2,
+        frame_count,
+        max_tokens,
+        temperature,
+        top_p,
+        num_beams,
+        repetition_penalty,
+        model_name="",
+        video=None,
+        enable_thinking=False,
+    ):
+        # Memory optimization: clear cache before generation
+        ensure_cuda_vram_headroom("QwenVL", min_free_gb=1.0, min_free_ratio=0.08)
+
+        def prepare_image(image, name="image"):
+            if isinstance(image, Image.Image):
+                print(f"[QwenVL] {name} provided as PIL image, size={image.size}")
+                return image
+            if hasattr(image, "dim"):
+                if image.dim() == 4 and image.shape[0] > 1:
+                    print(f"[QwenVL] {name.upper()} input contains {image.shape[0]} items; using the first item only.")
+                img_mean = image.mean().item()
+                print(f"[QwenVL] {name} pixel mean: {img_mean:.4f} (0.0 = black placeholder)")
+                if img_mean < 0.001:
+                    print(f"[QwenVL] WARNING: {name} appears to be a black placeholder! Skipping.")
+                    return None
+                return self.tensor_to_pil(image)
+            return None
+
+        conversation = [{"role": "user", "content": []}]
+
+        # --- Image 1: single reference image ---
+        pil_image = prepare_image(image, "image")
+        if pil_image is not None:
+            conversation[0]["content"].append({"type": "image", "image": pil_image})
+
+        # --- Image 2: single reference image (same as image, NOT video) ---
+        pil_image2 = prepare_image(image2, "image2")
+        if pil_image2 is not None:
+            conversation[0]["content"].append({"type": "image", "image": pil_image2})
+
+        # --- Video: multi-frame input with frame_count sampling ---
+        if video is not None:
+            if isinstance(video, list) and all(isinstance(frame, Image.Image) for frame in video):
+                frames = video
+                print(f"[QwenVL] Video: {len(frames)} PIL frames provided")
+            elif hasattr(video, "mean"):
+                vid_mean = video.mean().item()
+                print(f"[QwenVL] video pixel mean: {vid_mean:.4f} (0.0 = black placeholder)")
+                if vid_mean < 0.001:
+                    print(f"[QwenVL] WARNING: video appears to be a black placeholder! Skipping.")
+                    frames = []
+                else:
+                    frames = [self.tensor_to_pil(frame) for frame in video]
+                    print(f"[QwenVL] Video: {video.shape[0]} total frames, sampled {len(frames)} frames (frame_count={frame_count})")
+            else:
+                frames = []
+            if len(frames) > frame_count:
+                idx = np.linspace(0, len(frames) - 1, frame_count, dtype=int)
+                frames = [frames[i] for i in idx]
+            for frame in frames:
+                conversation[0]["content"].append({"type": "image", "image": frame})
+
+        num_images = sum(1 for item in conversation[0]["content"] if item.get("type") == "image")
+        print(f"[QwenVL] Total images passed to model: {num_images}")
+        conversation[0]["content"].append({"type": "text", "text": ("/no_think\n" if getattr(self, "is_qwen35", False) and not enable_thinking else "") + prompt_text})
+
+        # --- Qwen3.5 Heretic Logic: Template ---
+        is_qwen35 = getattr(self, "is_qwen35", False)
+        chat_kwargs = {}
+        if is_qwen35:
+            chat_kwargs["enable_thinking"] = bool(enable_thinking)
+
+        # Optimize chat template for memory efficiency
+        chat = self.processor.apply_chat_template(
+            conversation,
+            tokenize=False,
+            add_generation_prompt=True,
+            **chat_kwargs
+        )
+        
+        # Process images more efficiently
+        # All frames (image + video inputs) are now passed as individual images
+        images = [item["image"] for item in conversation[0]["content"] if item["type"] == "image"]
+        videos = None  # no longer used — all frames are images
+
+        # Use smaller batch size for memory efficiency
+        processed = self.processor(text=chat, images=images or None, videos=videos, return_tensors="pt")
+        
+        # Move to device more efficiently
+        model_device = next(self.model.parameters()).device
+        model_inputs = {
+            key: value.to(model_device, non_blocking=True) if torch.is_tensor(value) else value
+            for key, value in processed.items()
+        }
+        stop_tokens = [self.tokenizer.eos_token_id]
+        if hasattr(self.tokenizer, "eot_id") and self.tokenizer.eot_id is not None:
+            stop_tokens.append(self.tokenizer.eot_id)
+        
+        # Memory-efficient generation parameters
+        kwargs = {
+            "max_new_tokens": max_tokens,
+            "repetition_penalty": repetition_penalty,
+            "num_beams": num_beams,
+            "eos_token_id": stop_tokens,
+            "pad_token_id": self.tokenizer.pad_token_id,
+        }
+        if num_beams == 1:
+            kwargs.update({"do_sample": True, "temperature": temperature, "top_p": top_p})
+            # --- Qwen3.5 Heretic Logic: Top K ---
+            if is_qwen35:
+                kwargs["top_k"] = 20
+                print("[QwenVL] Qwen3.5 detected: Forcing top_k=20 for recommended tuning.")
+        else:
+            kwargs["do_sample"] = False
+            
+        # Generate with memory monitoring
+        try:
+            outputs = self.model.generate(**model_inputs, **kwargs)
+        except torch.cuda.OutOfMemoryError as e:
+            # Clear memory and retry with reduced parameters
+            print(f"[QwenVL] OOM detected, clearing memory and retrying...")
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            
+            # Retry with smaller max_tokens
+            reduced_tokens = max(256, max_tokens // 2)
+            kwargs["max_new_tokens"] = reduced_tokens
+            print(f"[QwenVL] Retrying with reduced tokens: {reduced_tokens}")
+            
+            try:
+                outputs = self.model.generate(**model_inputs, **kwargs)
+            except torch.cuda.OutOfMemoryError:
+                print(f"[QwenVL] OOM still occurs with {reduced_tokens} tokens, falling back to CPU")
+                # Fallback to CPU if GPU still OOM
+                device_backup = model_inputs["input_ids"].device
+                for key in model_inputs:
+                    if torch.is_tensor(model_inputs[key]):
+                        model_inputs[key] = model_inputs[key].cpu()
+                outputs = self.model.generate(**model_inputs, **kwargs)
+        
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+        input_len = model_inputs["input_ids"].shape[-1]
+        text = self.tokenizer.decode(outputs[0, input_len:], skip_special_tokens=True)
+        return text.strip()
+
+    def run(self, model_name, quantization, preset_prompt, custom_prompt, image, image2, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt=False, camera_tag="None", video=None, passthrough=False):
+        torch.manual_seed(seed)
+        
+        global LAST_SAVED_PROMPT
+        
+        # Passthrough mode: skip model loading entirely, return custom_prompt as-is.
+        # Used when the chat (or an external tool) already generated the final
+        # prompt in the target format — avoids redundant Qwen inference.
+        if passthrough:
+            print(f"[QwenVL] Passthrough mode ON — skipping model load, returning custom_prompt directly ({len(custom_prompt or '')} chars)")
+            return (custom_prompt or "",)
+        
+        # Simple keep last prompt logic
+        if keep_last_prompt:
+            print(f"[QwenVL] Keep last prompt enabled - using last saved prompt")
+            if LAST_SAVED_PROMPT:
+                print(f"[QwenVL] Using last prompt: {LAST_SAVED_PROMPT[:50]}...")
+                return (LAST_SAVED_PROMPT,)
+            else:
+                print(f"[QwenVL] No previous prompt found, returning empty")
+                return ("",)
+        
+        # Always generate when keep last prompt is disabled
+        print(f"[QwenVL] Keep last prompt disabled - generating new prompt")
+        print(f"[QwenVL] custom_prompt received: '{custom_prompt[:200] if custom_prompt else '(empty)'}'")
+        print(f"[QwenVL] image connected: {image is not None} (shape={image.shape if image is not None else 'N/A'})")
+        print(f"[QwenVL] image2 connected: {image2 is not None} (shape={image2.shape if image2 is not None else 'N/A'})")
+        print(f"[QwenVL] video connected: {video is not None} (shape={video.shape if video is not None else 'N/A'})")
+        
+        prompt_template = SYSTEM_PROMPTS.get(preset_prompt, preset_prompt)
+        
+        # Generate cache key with all inputs including seed
+        image_hash = get_image_hash(image)
+        image2_hash = get_image_hash(image2)
+        video_hash = get_video_hash(video)
+        # Combine image2 and video hashes for backward-compatible cache key
+        combined_hash = f"{image2_hash or ''}/{video_hash or ''}" if (image2_hash or video_hash) else None
+        cache_key = get_cache_key(model_name, preset_prompt, custom_prompt, image_hash, combined_hash, seed)
+        
+        # Check cache first (only for random mode)
+        if cache_key in PROMPT_CACHE:
+            cached_text = PROMPT_CACHE[cache_key].get("text", "")
+            if cached_text:
+                print(f"[QwenVL] Using cached prompt for seed {seed}: {cache_key[:8]}...")
+                return (cached_text,)
+        
+        prompt_template = add_danbooru_guidance(prompt_template, preset_prompt)
+        if custom_prompt and custom_prompt.strip():
+            # Combine user input with template - custom prompt first for priority
+            prompt = f"{custom_prompt.strip()}\n\n{prompt_template}"
+        else:
+            prompt = prompt_template
+
+        # ── Camera tag injection ───────────────────────────────────────────
+        # Qwen 9B has strong recency bias: tags at the start of a 10k-char
+        # prompt get diluted. Two sources of camera tags:
+        #   1. The `camera_tag` dropdown (authoritative, takes priority)
+        #   2. Tags written manually in custom_prompt (fallback)
+        # The chosen tag + its short description is injected BOTH at the
+        # start (as a prefix) and as a FINAL reminder at the end so the
+        # model sees it right before generation.
+        CAMERA_TAGS = list(CAMERA_TAG_DESCRIPTIONS.keys())
+        found_cam_tag = None
+        # Source 1: dropdown
+        if camera_tag and camera_tag.strip() and camera_tag.strip().upper() != "NONE":
+            tag_clean = camera_tag.strip().upper().strip("[]")
+            if tag_clean in CAMERA_TAGS:
+                found_cam_tag = tag_clean
+        # Source 2: manual tag in custom_prompt (only if dropdown is None)
+        if not found_cam_tag and custom_prompt and custom_prompt.strip():
+            upper = custom_prompt.upper()
+            for tag in CAMERA_TAGS:
+                if f"[{tag}]" in upper:
+                    found_cam_tag = tag
+                    break
+        if found_cam_tag:
+            desc = CAMERA_TAG_DESCRIPTIONS.get(found_cam_tag, "")
+            tag_str = f"[{found_cam_tag}]"
+            prefix = f"{tag_str}\n\n"
+            reminder = (
+                f"\n\n═══ FINAL CAMERA DIRECTIVE (HIGHEST PRIORITY) ═══\n"
+                f"Camera: {tag_str} — {desc}\n"
+                f"You MUST use this camera movement and NO other. "
+                f"{camera_directive_location(preset_prompt, prompt)}\n"
+                f"IMPORTANT: the camera tag controls ONLY the camera. "
+                f"The subject MUST still have natural, lively action and "
+                f"movement throughout the clip — breathing, gestures, "
+                f"expression changes, body motion, interaction with the "
+                f"environment. Do NOT freeze the subject just because the "
+                f"camera is moving. The subject is alive and active while "
+                f"the camera performs {tag_str}.\n"
+                f"═══ END DIRECTIVE ═══"
+            )
+            prompt = prefix + prompt + reminder
+
+        self.load_model(
+            model_name,
+            quantization,
+            attention_mode,
+            use_torch_compile,
+            device,
+            keep_model_loaded,
+        )
+        try:
+            text = self.generate(
+                prompt,
+                image,
+                image2,
+                frame_count,
+                max_tokens,
+                temperature,
+                top_p,
+                num_beams,
+                repetition_penalty,
+                model_name=model_name,
+                video=video,
+            )
+            
+            # Validate output before caching — reject "ready/waiting" responses
+            # that occur when the model treats the system prompt as a conversation
+            _lower = text.strip().lower()[:50]
+            if any(phrase in _lower for phrase in ["ready.", "ready to", "please paste", "paste your"]):
+                print(f"[QwenVL] WARNING: Model returned a 'waiting' response instead of generating. NOT caching.")
+                print(f"[QwenVL] Response: {text[:100]}...")
+            else:
+                # Cache the generated text
+                PROMPT_CACHE[cache_key] = {
+                    "text": text,
+                    "timestamp": torch.cuda.Event().record() if torch.cuda.is_available() else None,
+                    "model": model_name,
+                    "preset": preset_prompt,
+                    "seed": seed,
+                    "image_hash": image_hash,
+                    "video_hash": combined_hash
+                }
+                save_prompt_cache()
+            
+            print(f"[QwenVL] Cached new prompt for seed {seed}: {cache_key[:8]}...")
+            
+            # Save the generated prompt for future bypass mode
+            LAST_SAVED_PROMPT = text
+            print(f"[QwenVL] Saved prompt for bypass mode: {text[:50]}...")
+            
+            return (text,)
+        finally:
+            if not keep_model_loaded:
+                self.clear()
+
+class AILab_QwenVL(QwenVLBase):
+    @classmethod
+    def INPUT_TYPES(cls):
+        models = list(HF_VL_MODELS.keys())
+        default_model = models[0] if models else "Qwen3-VL-4B-Instruct"
+        prompts = PRESET_PROMPTS or ["Describe this image in detail."]
+        preferred_prompt = "🖼️ Detailed Description"
+        default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]
+        return {
+            "required": {
+                "model_name": (models, {"default": default_model, "tooltip": TOOLTIPS["model_name"]}),
+                "quantization": (Quantization.get_values(), {"default": Quantization.FP16.value, "tooltip": TOOLTIPS["quantization"]}),
+                "attention_mode": (ATTENTION_MODES, {"default": "auto", "tooltip": TOOLTIPS["attention_mode"]}),
+                "preset_prompt": (prompts, {"default": default_prompt, "tooltip": TOOLTIPS["preset_prompt"]}),
+                "camera_tag": (CAMERA_TAG_OPTIONS, {"default": "None", "tooltip": CAMERA_TAG_TOOLTIP}),
+                "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": TOOLTIPS["custom_prompt"]}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": TOOLTIPS["max_tokens"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": True, "tooltip": TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": TOOLTIPS["seed"] + "\n\n💡 Cache Info: Prompts are cached automatically. Use the same inputs (model, preset, custom prompt, image/image2/video) to reuse cached prompts and avoid regeneration.\n\n🔒 Fixed Seed Mode: Set seed = 1 to ignore image/image2/video changes and only use text-based caching. Perfect for keeping the same prompt regardless of media input variations."}),
+                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep the last generated prompt instead of creating a new one"}),
+                "passthrough": ("BOOLEAN", {"default": False, "tooltip": "Skip Qwen model loading and return custom_prompt directly. Use when the chat already generated the final prompt — saves VRAM and inference time."}),
+            },
+            "optional": {
+                "image": ("IMAGE", {"tooltip": "First reference image (single image). For R2VA this is Picture 1."}),
+                "image2": ("IMAGE", {"tooltip": "Second reference image (single image). For R2VA this is Picture 2."}),
+                "video": ("IMAGE", {"tooltip": "Video frames input. Use frame_count to control how many frames are sampled."}),
+                "video_path": ("STRING", {"default": "", "multiline": False, "tooltip": "Path to a video file (mp4/mov/avi...). Decoded to frames and used as the video input when the video socket is not connected. frame_count controls sampling."}),
+                "frame_count": ("INT", {"default": 16, "min": 1, "max": 64, "tooltip": TOOLTIPS["frame_count"]}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("RESPONSE",)
+    FUNCTION = "process"
+    CATEGORY = "QwenVL-Mod"
+
+    def process(self, model_name, quantization, preset_prompt, camera_tag, custom_prompt, attention_mode, max_tokens, keep_model_loaded, seed, keep_last_prompt=False, passthrough=False, image=None, image2=None, video=None, video_path="", frame_count=16):
+        if video is None and video_path and video_path.strip():
+            video = load_video_frames(video_path, frame_count)
+        return self.run(model_name, quantization, preset_prompt, custom_prompt, image, image2, frame_count, max_tokens, 0.6, 0.9, 1, 1.2, seed, keep_model_loaded, attention_mode, False, "auto", keep_last_prompt, camera_tag, video=video, passthrough=passthrough)
+
+class AILab_QwenVL_Advanced(QwenVLBase):
+    @classmethod
+    def INPUT_TYPES(cls):
+        models = list(HF_VL_MODELS.keys())
+        default_model = models[0] if models else "Qwen3-VL-4B-Instruct"
+        prompts = PRESET_PROMPTS or ["Describe this image in detail."]
+        preferred_prompt = "🖼️ Detailed Description"
+        default_prompt = preferred_prompt if preferred_prompt in prompts else prompts[0]
+
+        num_gpus = torch.cuda.device_count()
+        gpu_list = [f"cuda:{i}" for i in range(num_gpus)]
+        device_options = ["auto", "cpu", "mps"] + gpu_list
+
+        return {
+            "required": {
+                "model_name": (models, {"default": default_model, "tooltip": TOOLTIPS["model_name"]}),
+                "quantization": (Quantization.get_values(), {"default": Quantization.FP16.value, "tooltip": TOOLTIPS["quantization"]}),
+                "attention_mode": (ATTENTION_MODES, {"default": "auto", "tooltip": TOOLTIPS["attention_mode"]}),
+                "use_torch_compile": ("BOOLEAN", {"default": False, "tooltip": TOOLTIPS["use_torch_compile"]}),
+                "device": (device_options, {"default": "auto", "tooltip": TOOLTIPS["device"]}),
+                "preset_prompt": (prompts, {"default": default_prompt, "tooltip": TOOLTIPS["preset_prompt"]}),
+                "camera_tag": (CAMERA_TAG_OPTIONS, {"default": "None", "tooltip": CAMERA_TAG_TOOLTIP}),
+                "custom_prompt": ("STRING", {"default": "", "multiline": True, "tooltip": TOOLTIPS["custom_prompt"]}),
+                "max_tokens": ("INT", {"default": 8192, "min": 64, "max": 8192, "tooltip": TOOLTIPS["max_tokens"]}),
+                "temperature": ("FLOAT", {"default": 0.6, "min": 0.1, "max": 1.0, "tooltip": TOOLTIPS["temperature"]}),
+                "top_p": ("FLOAT", {"default": 0.9, "min": 0.0, "max": 1.0, "tooltip": TOOLTIPS["top_p"]}),
+                "num_beams": ("INT", {"default": 1, "min": 1, "max": 8, "tooltip": TOOLTIPS["num_beams"]}),
+                "repetition_penalty": ("FLOAT", {"default": 1.0, "min": 0.5, "max": 2.0, "tooltip": TOOLTIPS["repetition_penalty"]}),
+                "keep_model_loaded": ("BOOLEAN", {"default": True, "tooltip": TOOLTIPS["keep_model_loaded"]}),
+                "seed": ("INT", {"default": 1, "min": 1, "max": 2**32 - 1, "tooltip": TOOLTIPS["seed"] + "\n\n💡 Cache Info: Prompts are cached automatically. Use same inputs (model, preset, custom prompt, image/image2/video) to reuse cached prompts and avoid regeneration.\n\n🔒 Fixed Seed Mode: Set seed = 1 to ignore image/image2/video changes and only use text-based caching. Perfect for keeping the same prompt regardless of media input variations."}),
+                "keep_last_prompt": ("BOOLEAN", {"default": False, "tooltip": "Keep last generated prompt instead of creating a new one"}),
+                "passthrough": ("BOOLEAN", {"default": False, "tooltip": "Skip Qwen model loading and return custom_prompt directly. Use when the chat already generated the final prompt — saves VRAM and inference time."}),
+            },
+            "optional": {
+                "image": ("IMAGE", {"tooltip": "First reference image (single image). For R2VA this is Picture 1."}),
+                "image2": ("IMAGE", {"tooltip": "Second reference image (single image). For R2VA this is Picture 2."}),
+                "video": ("IMAGE", {"tooltip": "Video frames input. Use frame_count to control how many frames are sampled."}),
+                "video_path": ("STRING", {"default": "", "multiline": False, "tooltip": "Path to a video file (mp4/mov/avi...). Decoded to frames and used as the video input when the video socket is not connected. frame_count controls sampling."}),
+                "frame_count": ("INT", {"default": 16, "min": 1, "max": 64, "tooltip": TOOLTIPS["frame_count"]}),
+            },
+        }
+
+    RETURN_TYPES = ("STRING",)
+    RETURN_NAMES = ("RESPONSE",)
+    FUNCTION = "process"
+    CATEGORY = "QwenVL-Mod"
+
+    def process(self, model_name, quantization, attention_mode, use_torch_compile, device, preset_prompt, camera_tag, custom_prompt, max_tokens, temperature, top_p, num_beams, repetition_penalty, keep_model_loaded, seed, keep_last_prompt, passthrough=False, image=None, image2=None, video=None, video_path="", frame_count=16):
+        if video is None and video_path and video_path.strip():
+            video = load_video_frames(video_path, frame_count)
+        return self.run(model_name, quantization, preset_prompt, custom_prompt, image, image2, frame_count, max_tokens, temperature, top_p, num_beams, repetition_penalty, seed, keep_model_loaded, attention_mode, use_torch_compile, device, keep_last_prompt, camera_tag, video=video, passthrough=passthrough)
+
+NODE_CLASS_MAPPINGS = {
+    "AILab_QwenVL": AILab_QwenVL,
+    "AILab_QwenVL_Advanced": AILab_QwenVL_Advanced,
+}
+
+# ── Camera tag dropdown options ───────────────────────────────────
+# "None" = let the preset decide (default behavior). Any other value
+# is injected as [TAG] at the start of the user prompt AND as a final
+# reminder at the end, overriding any other camera instruction.
+CAMERA_TAG_OPTIONS = [
+    "None",
+    "[STATIC_CAMERA]",
+    "[LOCKED_OFF]",
+    "[SLOW_ZOOM_IN]",
+    "[SLOW_ZOOM_OUT]",
+    "[FAST_ZOOM_IN]",
+    "[FAST_ZOOM_OUT]",
+    "[PAN_LEFT]",
+    "[PAN_RIGHT]",
+    "[TILT_UP]",
+    "[TILT_DOWN]",
+    "[DOLLY_IN]",
+    "[DOLLY_OUT]",
+    "[TRACKING_LEFT]",
+    "[TRACKING_RIGHT]",
+    "[CRANE_UP]",
+    "[CRANE_DOWN]",
+    "[ORBIT]",
+    "[HANDHELD]",
+    "[ROLL]",
+]
+
+# Short per-tag descriptions injected into the prompt when the tag is
+# selected. Kept here instead of in the system prompts to keep presets
+# lean. Each description tells Qwen exactly what to write.
+CAMERA_TAG_DESCRIPTIONS = {
+    "STATIC_CAMERA":  "the camera MUST remain completely static. ABSOLUTELY NO zoom, pan, orbit, push-in, pull-out, tilt, tracking, or any motion whatsoever. You MUST explicitly state \"the camera remains locked-off, completely static throughout the entire clip\" and you MUST NOT describe any camera movement anywhere in the output.",
+    "LOCKED_OFF":     "the camera MUST remain completely static. ABSOLUTELY NO zoom, pan, orbit, push-in, pull-out, tilt, tracking, or any motion whatsoever. You MUST explicitly state \"the camera remains locked-off, completely static throughout the entire clip\" and you MUST NOT describe any camera movement anywhere in the output.",
+    "SLOW_ZOOM_IN":   "slow continuous push-in (dolly toward subject). The camera smoothly and continuously moves closer to the subject throughout the clip.",
+    "SLOW_ZOOM_OUT":  "slow continuous pull-back (dolly away from subject). The camera smoothly and continuously moves away from the subject throughout the clip.",
+    "FAST_ZOOM_IN":   "fast aggressive push-in, dramatic. The camera rapidly moves closer to the subject with energy.",
+    "FAST_ZOOM_OUT":  "fast pull-back, reveal context. The camera rapidly moves away from the subject to reveal the wider scene.",
+    "PAN_LEFT":       "smooth horizontal pan from right to left. The camera rotates smoothly on its axis, moving the framing from right to left.",
+    "PAN_RIGHT":      "smooth horizontal pan from left to right. The camera rotates smoothly on its axis, moving the framing from left to right.",
+    "TILT_UP":        "smooth vertical tilt from bottom to top, revealing the subject. The camera rotates upward on its axis.",
+    "TILT_DOWN":      "smooth vertical tilt from top to bottom. The camera rotates downward on its axis.",
+    "DOLLY_IN":       "physical dolly movement toward the subject (not optical zoom — the camera moves through space, creating parallax).",
+    "DOLLY_OUT":      "physical dolly movement away from the subject (not optical zoom — the camera moves through space, creating parallax).",
+    "TRACKING_LEFT":  "lateral tracking shot moving left, subject stays in frame. The camera physically moves left while keeping the subject centered.",
+    "TRACKING_RIGHT": "lateral tracking shot moving right, subject stays in frame. The camera physically moves right while keeping the subject centered.",
+    "CRANE_UP":       "crane/jib movement rising upward, revealing the scene from above. The camera physically rises.",
+    "CRANE_DOWN":     "crane/jib movement descending toward the subject. The camera physically descends.",
+    "ORBIT":          "smooth 360-degree orbit around the subject. The camera circles completely around the subject.",
+    "HANDHELD":       "subtle handheld sway with natural micro-movements. The camera feels held by a person, with gentle bob and sway.",
+    "ROLL":           "slow camera roll (rotation around the lens axis). The horizon slowly rotates.",
+}
+
+CAMERA_TAG_TOOLTIP = (
+    "Camera movement override for video presets (MiniMax H3, WAN, etc). "
+    "'None' lets the preset decide. Any other value is injected as a "
+    "[TAG] and reinforced at the end of the prompt so Qwen respects it."
+)
+
+# ── Style tag dropdown ────────────────────────────────────────────────
+# Replaces the vidstyle.txt wildcard for T2VA/T2V presets. Injected with
+# the same priority mechanism as camera_tag: prefix + final reminder.
+STYLE_TAG_OPTIONS = [
+    "None",
+    "[ANIME]",
+    "[PHOTOREALISTIC]",
+    "[3DCG]",
+    "[CARTOON]",
+    "[CLAYMATION]",
+    "[WATERCOLOR]",
+    "[VINTAGE]",
+    "[NOIR]",
+    "[CYBERPUNK]",
+    "[FANTASY]",
+    "[SOFTFOCUS]",
+    "[HENTAI]",
+]
+
+STYLE_TAG_DESCRIPTIONS = {
+    "ANIME":        "2D-animated, cel-shaded, vibrant anime color palette, clean lineart, anime-style lighting",
+    "PHOTOREALISTIC": "Live-action, cinematic photorealism, natural skin textures, realistic lighting, shallow depth of field",
+    "3DCG":         "3D CG rendered, subsurface scattering, physically based rendering, cinematic 3D animation",
+    "CARTOON":      "2D cartoon, bold outlines, flat colors, exaggerated expressions, cartoon-style animation",
+    "CLAYMATION":   "Claymation, stop-motion clay texture, handcrafted look, visible fingerprints, studio lighting",
+    "WATERCOLOR":   "Watercolor painting style, soft bleeding pigments, paper texture, hand-painted aesthetic",
+    "VINTAGE":      "Vintage film, 35mm grain, muted colors, halation, film scratches, analog warmth",
+    "NOIR":         "Film noir, high-contrast black and white, harsh shadows, venetian blind light, moody atmosphere",
+    "CYBERPUNK":    "Cyberpunk, neon-lit, holographic displays, rainy night, chrome reflections, magenta-cyan palette",
+    "FANTASY":      "Fantasy, ethereal lighting, magical particles, painterly atmosphere, mystical glow",
+    "SOFTFOCUS":    "Soft focus, dreamy diffusion, bloom, pastel palette, romantic atmosphere",
+    "HENTAI":       "2D-animated hentai, cel-shaded, explicit anime style, clean lineart, anime-style lighting",
+}
+
+STYLE_TAG_TOOLTIP = (
+    "Visual style override for video presets (MiniMax H3, LTX 2.3, WAN, etc). "
+    "'None' lets the preset decide. Any other value is injected as a "
+    "[TAG] and reinforced at the end of the prompt so Qwen respects it. "
+    "For image-reference modes, identity and composition remain anchored to the references."
+)
+
+DANBOORU_INPUT_GUIDANCE = """INPUT TAG SUPPORT:
+- The user input may be natural language, Danbooru-style comma-separated tags, or mixed text with TagComplete wildcards already resolved.
+- Treat Danbooru tags as a visual blueprint and expand them into fluent cinematic English.
+- Preserve every non-conflicting tag: subject count, identity, anatomy, hair, eyes, clothing, pose, expression, action, environment, lighting, framing, and style.
+- Resolve conflicting tags logically instead of silently dropping them.
+- Anime-typical tags default to 2D animation unless a style directive or reference image establishes another style.
+- Text input takes priority for requested action and motion; reference images remain authoritative for visible identity, appearance, and composition unless the user explicitly requests a change."""
+
+
+def add_danbooru_guidance(prompt, preset_name):
+    name = preset_name or ""
+    if "LTX 2.3" not in name and not ("MiniMax H3" in name and ("R2VA" in name or "FL2VA" in name)) and not ("Wan" in name and "T2V" in name):
+        return prompt
+    if "INPUT TAG SUPPORT:" in prompt or "Danbooru-style tags" in prompt:
+        return prompt
+    return f"{prompt}\n\n{DANBOORU_INPUT_GUIDANCE}"
+
+
+def camera_directive_location(preset_name, prompt=""):
+    context = f"{preset_name or ''}\n{prompt or ''}"
+    if "LTX 2.3" in context:
+        return "State it explicitly in the first sentence of the video description; do not introduce a [Shot 1] label unless the selected preset already requires one."
+    if "MiniMax H3" in context:
+        return "State it explicitly in the first sentence of [Shot 1]."
+    return "State it explicitly in the first sentence of the generated video prompt."
+
+
+def style_reference_guard(preset_name, prompt=""):
+    context = f"{preset_name or ''}\n{prompt or ''}"
+    if any(mode in context for mode in ("I2V", "FL2VA", "R2VA", "L2VA")):
+        return " Apply the style consistently while preserving the reference image subjects' identity, visible appearance, composition, and continuity unless the user explicitly requests a change."
+    return ""
+
+NODE_DISPLAY_NAME_MAPPINGS = {
+    "AILab_QwenVL": "🔷 QwenVL-Mod",
+    "AILab_QwenVL_Advanced": "🔷 QwenVL-Mod (Advanced)",
+}
