@@ -125,19 +125,20 @@ def main():
         run(["git", "pull"], cwd=COMFY_DIR)
 
     # ==========================================
-    # 🚀 STEP 2b: FORCE UPDATE COMFYUI-MANAGER
+    # 🚀 STEP 2b: INSTALL COMFYUI-MANAGER v4.2.2
     # ==========================================
-    print("\n=== Step 2b: Updating ComfyUI-Manager to latest main branch ===")
+    print("\n=== Step 2b: Installing ComfyUI-Manager v4.2.2 ===")
     manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
     
     # To prevent Vast.ai's persistent storage from getting stuck on old detached HEADs,
-    # we completely wipe the folder and re-clone it to guarantee the latest code.
+    # we completely wipe the folder and re-clone it to guarantee the correct version.
     if os.path.isdir(manager_dir):
-        print("Existing Manager folder found. Wiping it to ensure a clean, up-to-date clone...")
+        print("Existing Manager folder found. Wiping it to ensure a clean clone...")
         shutil.rmtree(manager_dir)
         
-    print("Cloning fresh copy of ComfyUI-Manager...")
+    print("Cloning ComfyUI-Manager and checking out v4.2.2...")
     run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    run(["git", "checkout", "v4.2.2"], cwd=manager_dir)
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
