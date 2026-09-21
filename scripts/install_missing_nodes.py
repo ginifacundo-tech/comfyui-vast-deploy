@@ -10,7 +10,6 @@ PYTHON_BIN = "/workspace/comfy_venv/bin/python"
 # List the workflows you want to scan for missing nodes
 WORKFLOWS_TO_SCAN = [
     "workflow_academia.json",
-    # Add any other workflow filenames here if you download more
 ]
 
 def scan_and_install(workflow_name):
