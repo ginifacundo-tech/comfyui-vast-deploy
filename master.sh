@@ -86,7 +86,25 @@ echo "✅ Workflow downloaded successfully!" | tee -a /workspace/provisioning.lo
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "✅ COMPLETED: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
+# ==========================================
+# 🚀 PHASE 1.5: APPLY GLOBAL COMFYUI SETTINGS
+# ==========================================
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "⏳ STARTING: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
 
+# Ensure the user settings directory exists
+SETTINGS_DIR="/workspace/ComfyUI/user/default"
+mkdir -p "$SETTINGS_DIR"
+
+# Download your custom settings file from the GitHub repo
+# (If your file is in the root of the repo instead of a 'config' folder, remove '/config' from the URL)
+curl -sL "$REPO_RAW_BASE/config/comfy.settings.json" -o "$SETTINGS_DIR/comfy.settings.json"
+
+echo "✅ Global settings applied successfully!" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
+echo "✅ COMPLETED: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
+echo "============================================================" | tee -a /workspace/provisioning.log
 # ==========================================
 # 🚀 PHASE 2: EARLY LAUNCH
 # ==========================================
