@@ -128,7 +128,11 @@ def main():
     # 🚀 STEP 2b: INSTALL COMFYUI-MANAGER v4.2.2
     # ==========================================
     print("\n=== Step 2b: Installing ComfyUI-Manager v4.2.2 ===")
-    manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
+    custom_nodes_dir = os.path.join(COMFY_DIR, "custom_nodes")
+    manager_dir = os.path.join(custom_nodes_dir, "ComfyUI-Manager")
+    
+    # Ensure custom_nodes directory exists
+    os.makedirs(custom_nodes_dir, exist_ok=True)
     
     # To prevent Vast.ai's persistent storage from getting stuck on old detached HEADs,
     # we completely wipe the folder and re-clone it to guarantee the correct version.
@@ -136,10 +140,13 @@ def main():
         print("Existing Manager folder found. Wiping it to ensure a clean clone...")
         shutil.rmtree(manager_dir)
         
-    print("Cloning ComfyUI-Manager and checking out v4.2.2...")
+    print("Cloning ComfyUI-Manager...")
     run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    print("Fetching tags...")
     run(["git", "fetch", "--tags"], cwd=manager_dir)
+    print("Checking out version 4.2.2...")
     run(["git", "checkout", "4.2.2"], cwd=manager_dir)
+    print("✓ ComfyUI-Manager v4.2.2 installed successfully")
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
@@ -154,9 +161,17 @@ def main():
     run([PIP_BIN, "install", "-r", os.path.join(COMFY_DIR, "requirements.txt")])
     
     print("\n=== Step 5b: Installing ComfyUI-Manager requirements ===")
+    if not os.path.isdir(manager_dir):
+        print(f"❌ ERROR: Manager directory not found at {manager_dir}")
+        print("This likely means the git checkout failed. Exiting.")
+        sys.exit(1)
+    
     manager_requirements = os.path.join(manager_dir, "requirements.txt")
     if os.path.isfile(manager_requirements):
+        print(f"Found Manager requirements at {manager_requirements}")
         run([PIP_BIN, "install", "-r", manager_requirements])
+    else:
+        print(f"⚠️  Warning: Manager requirements.txt not found at {manager_requirements}")
 
     print("\n=== Done ===")
     print("Launch with:")
