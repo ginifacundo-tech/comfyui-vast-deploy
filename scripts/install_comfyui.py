@@ -123,18 +123,42 @@ def main():
     else:
         run(["git", "pull"], cwd=COMFY_DIR)
 
-    print("\n=== Step 2b: Updating ComfyUI-Manager (Comfy-Org) ===")
+    # ==========================================
+    # 🚀 STEP 2b: LOCK COMFYUI-MANAGER TO 4.4.2
+    # ==========================================
+    print("\n=== Step 2b: Installing ComfyUI-Manager (Exact Version 4.4.2) ===")
     manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
+    
     if not os.path.isdir(manager_dir):
-        # Clone from the official Comfy-Org repository
         run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
-    else:
-        # Force update to the absolute latest commit, ignoring local changes or detached HEAD states
-        print("Manager folder exists. Forcing update to latest origin/main...")
-        # Ensure we are pointing to the correct official repo (in case it was cloned from the old ltdrdata account)
-        run(["git", "remote", "set-url", "origin", "https://github.com/Comfy-Org/ComfyUI-Manager.git"], cwd=manager_dir, check=False)
-        run(["git", "fetch", "--all"], cwd=manager_dir, check=False)
-        run(["git", "reset", "--hard", "origin/main"], cwd=manager_dir, check=False)
+        
+    # Ensure we are pointing to the correct official repo
+    run(["git", "remote", "set-url", "origin", "https://github.com/Comfy-Org/ComfyUI-Manager.git"], cwd=manager_dir, check=False)
+    
+    # Fetch all tags and branches from GitHub
+    print("Fetching all tags and branches...")
+    run(["git", "fetch", "--all", "--tags"], cwd=manager_dir, check=False)
+    
+    # Clean any local modifications that might block the checkout
+    run(["git", "reset", "--hard", "HEAD"], cwd=manager_dir, check=False)
+    run(["git", "clean", "-fd"], cwd=manager_dir, check=False)
+    
+    # Attempt to checkout the exact version
+    target_versions = ["v4.4.2", "4.4.2"]
+    success = False
+    
+    for version in target_versions:
+        print(f"Attempting to lock to version: {version}...")
+        result = subprocess.run(["git", "checkout", version], cwd=manager_dir, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"✅ Successfully locked ComfyUI-Manager to exact version: {version}")
+            success = True
+            break
+            
+    if not success:
+        print("⚠️ WARNING: Could not find tag 'v4.4.2' or '4.4.2'.")
+        print("   Falling back to the main branch. Check GitHub releases for the exact tag format.")
+        run(["git", "checkout", "main"], cwd=manager_dir, check=False)
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
@@ -154,8 +178,6 @@ def main():
         run([PIP_BIN, "install", "-r", manager_requirements])
 
     print("\n=== Done ===")
-    print(f"ComfyUI: {COMFY_DIR}")
-    print(f"Venv:    {VENV_DIR}")
     print("Launch with:")
     print(f"  {PYTHON_BIN} {os.path.join(COMFY_DIR, 'main.py')} --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui")
 
