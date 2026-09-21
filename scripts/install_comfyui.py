@@ -138,7 +138,8 @@ def main():
         
     print("Cloning ComfyUI-Manager and checking out v4.2.2...")
     run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
-    run(["git", "checkout", "v4.2.2"], cwd=manager_dir)
+    run(["git", "fetch", "--tags"], cwd=manager_dir)
+    run(["git", "checkout", "4.2.2"], cwd=manager_dir)
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
