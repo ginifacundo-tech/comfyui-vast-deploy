@@ -6,6 +6,7 @@ import os
 import re
 import subprocess
 import sys
+import shutil
 
 WORKSPACE = "/workspace"
 COMFY_DIR = os.path.join(WORKSPACE, "ComfyUI")
@@ -124,30 +125,19 @@ def main():
         run(["git", "pull"], cwd=COMFY_DIR)
 
     # ==========================================
-    # 🚀 STEP 2b: LOCK COMFYUI-MANAGER TO v4.2.2
+    # 🚀 STEP 2b: FORCE UPDATE COMFYUI-MANAGER
     # ==========================================
-    print("\n=== Step 2b: Installing ComfyUI-Manager (Exact Version v4.2.2) ===")
+    print("\n=== Step 2b: Updating ComfyUI-Manager to latest main branch ===")
     manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
     
-    if not os.path.isdir(manager_dir):
-        run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    # To prevent Vast.ai's persistent storage from getting stuck on old detached HEADs,
+    # we completely wipe the folder and re-clone it to guarantee the latest code.
+    if os.path.isdir(manager_dir):
+        print("Existing Manager folder found. Wiping it to ensure a clean, up-to-date clone...")
+        shutil.rmtree(manager_dir)
         
-    run(["git", "remote", "set-url", "origin", "https://github.com/Comfy-Org/ComfyUI-Manager.git"], cwd=manager_dir, check=False)
-    
-    print("Fetching all tags and branches...")
-    run(["git", "fetch", "--all", "--tags"], cwd=manager_dir, check=False)
-    
-    run(["git", "reset", "--hard", "HEAD"], cwd=manager_dir, check=False)
-    run(["git", "clean", "-fd"], cwd=manager_dir, check=False)
-    
-    # The exact tag on GitHub is 'v4.2.2'
-    print("Attempting to lock to version: v4.2.2...")
-    result = subprocess.run(["git", "checkout", "v4.2.2"], cwd=manager_dir, capture_output=True, text=True)
-    if result.returncode == 0:
-        print("✅ Successfully locked ComfyUI-Manager to exact version: v4.2.2")
-    else:
-        print("⚠️ WARNING: Could not find tag 'v4.2.2'. Falling back to main branch.")
-        run(["git", "checkout", "main"], cwd=manager_dir, check=False)
+    print("Cloning fresh copy of ComfyUI-Manager...")
+    run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
