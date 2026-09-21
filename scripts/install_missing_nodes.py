@@ -15,9 +15,8 @@ WORKFLOWS_TO_SCAN = [
 
 def scan_and_install(workflow_name):
     workflow_path = os.path.join(WORKFLOW_DIR, workflow_name)
-    
     if not os.path.exists(workflow_path):
-        print(f"⚠️ Workflow '{workflow_name}' not found. Skipping.")
+        print(f"⚠️ Workflow '{workflow_name}' not found at {workflow_path}. Skipping.")
         return
 
     print(f"\n🔍 Scanning '{workflow_name}' for missing nodes...")
@@ -45,13 +44,12 @@ def scan_and_install(workflow_name):
         process.wait()
         
         if process.returncode != 0 or not os.path.exists(deps_file):
-            print(f"⚠️ Failed to extract dependencies from workflow.")
+            print(f"⚠️ Failed to extract dependencies from workflow. (Exit code: {process.returncode})")
             return
             
         # Step 2: Install the extracted dependencies
         print(f"\n📦 Installing missing nodes from {deps_file}...")
         cmd_install = [PYTHON_BIN, CM_CLI, "install-deps", deps_file]
-        
         process = subprocess.Popen(
             cmd_install, 
             cwd=COMFYUI_DIR, 
@@ -68,14 +66,16 @@ def scan_and_install(workflow_name):
             print(f"✅ Successfully installed missing nodes for '{workflow_name}'!")
         else:
             print(f"⚠️ CLI exited with code {process.returncode}. Some nodes might need manual installation in the GUI.")
-            
     except Exception as e:
         print(f"❌ Error running cm-cli.py: {e}")
 
 if __name__ == "__main__":
     if not os.path.exists(CM_CLI):
-        print("❌ ComfyUI-Manager not found! Install ComfyUI and ComfyUI-Manager first.")
+        print(f"❌ ComfyUI-Manager cm-cli.py not found at {CM_CLI}!")
+        print("   Please ensure ComfyUI and ComfyUI-Manager are installed first.")
         sys.exit(1)
         
     for wf in WORKFLOWS_TO_SCAN:
         scan_and_install(wf)
+        
+    print("\n🎉 Missing nodes scan and installation complete!")
