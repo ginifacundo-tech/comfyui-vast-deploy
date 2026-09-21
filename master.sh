@@ -62,10 +62,8 @@ SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_
 for script in "${SCRIPTS[@]}"; do
     curl -sL "$REPO_RAW_BASE/scripts/$script" -o "/tmp/$script"
     
-    # SAFETY CHECK: Did we accidentally download a 404 page?
     if [ ! -s "/tmp/$script" ] || grep -q "404: Not Found" "/tmp/$script"; then
         echo "❌ CRITICAL ERROR: Failed to download $script" | tee -a /workspace/provisioning.log
-        echo "   Please verify the file exists in the 'scripts/' folder of your repo." | tee -a /workspace/provisioning.log
         exit 1
     fi
     chmod +x "/tmp/$script"
@@ -75,6 +73,16 @@ done
 # 🚀 PHASE 1: CORE SETUP & WORKFLOW (FOREGROUND)
 # ==========================================
 run_task_foreground "Installing ComfyUI Core" "/tmp/install_comfyui.py"
+
+# 🔧 FIX: Allow ComfyUI-Manager CLI to install nodes without the 0.0.0.0 security block
+MANAGER_CONFIG="/workspace/ComfyUI/custom_nodes/ComfyUI-Manager/config.ini"
+if [ -f "$MANAGER_CONFIG" ]; then
+    sed -i 's/allow_git_url_install = False/allow_git_url_install = True/g' "$MANAGER_CONFIG"
+    if ! grep -q "allow_git_url_install" "$MANAGER_CONFIG"; then
+        sed -i '/^\[default\]/a allow_git_url_install = True' "$MANAGER_CONFIG"
+    fi
+    echo "✅ ComfyUI-Manager config updated to allow CLI installations." | tee -a /workspace/provisioning.log
+fi
 
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "⏳ STARTING: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
@@ -86,6 +94,9 @@ echo "✅ Workflow downloaded successfully!" | tee -a /workspace/provisioning.lo
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "✅ COMPLETED: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
+
+# 🔧 FIX: Run Missing Nodes installation BEFORE launching ComfyUI to avoid the security block
+run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
 
 # ==========================================
 # 🚀 PHASE 1.5: APPLY GLOBAL COMFYUI SETTINGS
@@ -118,19 +129,15 @@ echo "✅ COMPLETED: Launching ComfyUI EARLY" | tee -a /workspace/provisioning.l
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 # ==========================================
-# 🚀 PHASE 3: MISSING NODES & BACKGROUND TASKS
+# 🚀 PHASE 3: BACKGROUND TASKS
 # ==========================================
-run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
-
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "⏳ STARTING: Background Tasks" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 (
-    # 1. Install nodes first
     run_task_background "Installing Custom Nodes" "/tmp/install_nodes.py" "/workspace/nodes_install.log"
     
-    # 2. Apply custom patches immediately after nodes are cloned
     echo "============================================================"
     echo "⏳ STARTING: Patching ComfyUI-QwenVL-Mod"
     echo "============================================================"
@@ -145,7 +152,6 @@ echo "============================================================" | tee -a /wo
     fi
     echo "============================================================"
     
-    # 3. Continue with heavy downloads
     run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"
     run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
     run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
