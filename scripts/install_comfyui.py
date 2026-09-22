@@ -1,7 +1,3 @@
-"""
-ComfyUI (+ ComfyUI-Manager) install script for vast.ai (Jupyter)
-==================================================================
-"""
 import os
 import re
 import subprocess
@@ -124,36 +120,16 @@ def main():
     else:
         run(["git", "pull"], cwd=COMFY_DIR)
 
-    # ==========================================
-    # 🚀 STEP 2b: INSTALL COMFYUI-MANAGER v4.2.2
-    # ==========================================
-    print("\n=== Step 2b: Installing ComfyUI-Manager v4.2.2 ===")
-    custom_nodes_dir = os.path.join(COMFY_DIR, "custom_nodes")
-    manager_dir = os.path.join(custom_nodes_dir, "ComfyUI-Manager")
+    print("\n=== Step 2b: Ensuring clean ComfyUI-Manager installation ===")
+    manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
     
-    # Ensure custom_nodes directory exists
-    os.makedirs(custom_nodes_dir, exist_ok=True)
-    
-    # To prevent Vast.ai's persistent storage from getting stuck on old detached HEADs,
-    # we completely wipe the folder and re-clone it to guarantee the correct version.
+    # Wipe any old, broken, or detached-HEAD folder to guarantee a clean clone
     if os.path.isdir(manager_dir):
-        print("Existing Manager folder found. Wiping it to ensure a clean clone...")
+        print("Existing Manager folder found. Wiping it to ensure a clean, up-to-date clone...")
         shutil.rmtree(manager_dir)
         
-    print("Cloning ComfyUI-Manager with v4.2.2 tag...")
-    # Clone with --branch to checkout specific tag during clone
-    run(["git", "clone", "--branch", "4.2.2", "--depth", "1", 
-         "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
-    print("✓ ComfyUI-Manager v4.2.2 installed successfully")
-    
-    # Verify we got the right version
-    try:
-        version_check = subprocess.check_output(
-            ["git", "describe", "--tags"], cwd=manager_dir, text=True
-        ).strip()
-        print(f"  Confirmed version: {version_check}")
-    except Exception as e:
-        print(f"  Warning: could not verify version ({e})")
+    print("Cloning fresh copy of ComfyUI-Manager from Comfy-Org (main branch)...")
+    run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
@@ -168,21 +144,11 @@ def main():
     run([PIP_BIN, "install", "-r", os.path.join(COMFY_DIR, "requirements.txt")])
     
     print("\n=== Step 5b: Installing ComfyUI-Manager requirements ===")
-    if not os.path.isdir(manager_dir):
-        print(f"❌ ERROR: Manager directory not found at {manager_dir}")
-        print("This likely means the git checkout failed. Exiting.")
-        sys.exit(1)
-    
     manager_requirements = os.path.join(manager_dir, "requirements.txt")
     if os.path.isfile(manager_requirements):
-        print(f"Found Manager requirements at {manager_requirements}")
         run([PIP_BIN, "install", "-r", manager_requirements])
-    else:
-        print(f"⚠️  Warning: Manager requirements.txt not found at {manager_requirements}")
 
     print("\n=== Done ===")
-    print("Launch with:")
-    print(f"  {PYTHON_BIN} {os.path.join(COMFY_DIR, 'main.py')} --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui")
 
 if __name__ == "__main__":
     main()
