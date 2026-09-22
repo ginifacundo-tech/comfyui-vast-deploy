@@ -57,8 +57,7 @@ run_task_background() {
 REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Fetching provisioning scripts from GitHub Repo..."
-SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_loras.py" "install_sageattention.py" "install_missing_nodes.py")
-
+SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_loras.py" "install_sageattention.py" "install_flash_attention.py" "install_missing_nodes.py")
 for script in "${SCRIPTS[@]}"; do
     curl -sL "$REPO_RAW_BASE/scripts/$script" -o "/tmp/$script"
     
@@ -152,10 +151,16 @@ echo "============================================================" | tee -a /wo
     fi
     echo "============================================================"
     
+    (
     run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"
     run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
+    run_task_background "Installing Flash Attention 2" "/tmp/install_flash_attention.py" "/workspace/flash_attention_build.log"
     run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
     
+    echo "============================================================"
+    echo "✅ ALL BACKGROUND TASKS FINISHED"
+    echo "============================================================"
+) &
     echo "============================================================"
     echo "✅ ALL BACKGROUND TASKS FINISHED"
     echo "============================================================"
