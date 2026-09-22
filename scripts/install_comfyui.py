@@ -1,8 +1,11 @@
+"""
+ComfyUI (+ ComfyUI-Manager) install script for vast.ai (Jupyter)
+==================================================================
+"""
 import os
 import re
 import subprocess
 import sys
-import shutil
 
 WORKSPACE = "/workspace"
 COMFY_DIR = os.path.join(WORKSPACE, "ComfyUI")
@@ -120,16 +123,18 @@ def main():
     else:
         run(["git", "pull"], cwd=COMFY_DIR)
 
-    print("\n=== Step 2b: Ensuring clean ComfyUI-Manager installation ===")
+    print("\n=== Step 2b: Updating ComfyUI-Manager (Comfy-Org) ===")
     manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
-    
-    # Wipe any old, broken, or detached-HEAD folder to guarantee a clean clone
-    if os.path.isdir(manager_dir):
-        print("Existing Manager folder found. Wiping it to ensure a clean, up-to-date clone...")
-        shutil.rmtree(manager_dir)
-        
-    print("Cloning fresh copy of ComfyUI-Manager from Comfy-Org (main branch)...")
-    run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    if not os.path.isdir(manager_dir):
+        # Clone from the official Comfy-Org repository
+        run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    else:
+        # Force update to the absolute latest commit, ignoring local changes or detached HEAD states
+        print("Manager folder exists. Forcing update to latest origin/main...")
+        # Ensure we are pointing to the correct official repo (in case it was cloned from the old ltdrdata account)
+        run(["git", "remote", "set-url", "origin", "https://github.com/Comfy-Org/ComfyUI-Manager.git"], cwd=manager_dir, check=False)
+        run(["git", "fetch", "--all"], cwd=manager_dir, check=False)
+        run(["git", "reset", "--hard", "origin/main"], cwd=manager_dir, check=False)
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
@@ -149,6 +154,10 @@ def main():
         run([PIP_BIN, "install", "-r", manager_requirements])
 
     print("\n=== Done ===")
+    print(f"ComfyUI: {COMFY_DIR}")
+    print(f"Venv:    {VENV_DIR}")
+    print("Launch with:")
+    print(f"  {PYTHON_BIN} {os.path.join(COMFY_DIR, 'main.py')} --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui")
 
 if __name__ == "__main__":
     main()
