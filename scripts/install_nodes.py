@@ -9,7 +9,7 @@ COMFYUI_DIR = "/workspace/ComfyUI"
 PYTHON = sys.executable
 
 CUSTOM_NODES = [
-    "https://github.com/MoonGoblinDev/Civicomfy","https://github.com/huchukato/ComfyUI-QwenVL-Mod"
+    "https://github.com/MoonGoblinDev/Civicomfy"
 ]
 
 WORKFLOWS = [
