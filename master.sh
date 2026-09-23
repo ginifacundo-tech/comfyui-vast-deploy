@@ -59,7 +59,7 @@ run_task_background() {
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
 # ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO_NAME' WITH YOUR ACTUAL GITHUB INFO!
-REPO_RAW_BASE="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main"
+REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Evaluating enabled scripts..."
 SCRIPTS_TO_DOWNLOAD=()
