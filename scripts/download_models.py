@@ -72,6 +72,24 @@ MODELS = [
         "filename": "vae_approx/taeh3.safetensors", 
         "dest": f"{COMFYUI_DIR}/models/"
     },
+    {
+        "env_var": "SET_ENV_VAR",
+        "repo": "REPO", 
+        "filename": "FILENAME", 
+        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
+    },
+    {
+        "env_var": "SET_ENV_VAR",
+        "repo": "REPO", 
+        "filename": "FILENAME", 
+        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
+    },
+    {
+        "env_var": "SET_ENV_VAR",
+        "repo": "REPO", 
+        "filename": "FILENAME", 
+        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
+    },
 ]
 
 from huggingface_hub import hf_hub_download
