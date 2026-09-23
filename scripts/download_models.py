@@ -26,7 +26,8 @@ if HF_TOKEN:
         print(f"⚠️ Token verification failed: {e}")
 
 MODELS = [
-    {"repo": "Comfy-Org/MiniMax-H3", "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", "dest": f"{COMFYUI_DIR}/models/"},
+    {"repo": "WarmBloodAban/Minimax-h3_Singularity", "filename": "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors", "dest": f"{COMFYUI_DIR}/models/"},
+    #{"repo": "Comfy-Org/MiniMax-H3", "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", "dest": f"{COMFYUI_DIR}/models/"},
     {"repo": "ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot", "filename": "qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors", "dest": f"{COMFYUI_DIR}/models/text_encoders/"},
     {"repo": "larryvrh/MiniMax-H3-Turbo-Lora", "filename": "minimax_h3_turbo_v4_step600_ema.safetensors", "dest": f"{COMFYUI_DIR}/models/loras/"},
     {"repo": "Comfy-Org/MiniMax-H3", "filename": "vae/minimax_h3_video_vae_fp16.safetensors", "dest": f"{COMFYUI_DIR}/models/"},
