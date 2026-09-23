@@ -1,11 +1,8 @@
-"""
-ComfyUI (+ ComfyUI-Manager) install script for vast.ai (Jupyter)
-==================================================================
-"""
 import os
 import re
 import subprocess
 import sys
+import shutil
 
 WORKSPACE = "/workspace"
 COMFY_DIR = os.path.join(WORKSPACE, "ComfyUI")
@@ -123,42 +120,15 @@ def main():
     else:
         run(["git", "pull"], cwd=COMFY_DIR)
 
-    # ==========================================
-    # 🚀 STEP 2b: LOCK COMFYUI-MANAGER TO 4.4.2
-    # ==========================================
-    print("\n=== Step 2b: Installing ComfyUI-Manager (Exact Version 4.4.2) ===")
+    print("\n=== Step 2b: Ensuring clean ComfyUI-Manager installation ===")
     manager_dir = os.path.join(COMFY_DIR, "custom_nodes", "ComfyUI-Manager")
     
-    if not os.path.isdir(manager_dir):
-        run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
+    if os.path.isdir(manager_dir):
+        print("Existing Manager folder found. Wiping it to ensure a clean, up-to-date clone...")
+        shutil.rmtree(manager_dir)
         
-    # Ensure we are pointing to the correct official repo
-    run(["git", "remote", "set-url", "origin", "https://github.com/Comfy-Org/ComfyUI-Manager.git"], cwd=manager_dir, check=False)
-    
-    # Fetch all tags and branches from GitHub
-    print("Fetching all tags and branches...")
-    run(["git", "fetch", "--all", "--tags"], cwd=manager_dir, check=False)
-    
-    # Clean any local modifications that might block the checkout
-    run(["git", "reset", "--hard", "HEAD"], cwd=manager_dir, check=False)
-    run(["git", "clean", "-fd"], cwd=manager_dir, check=False)
-    
-    # Attempt to checkout the exact version
-    target_versions = ["v4.4.2", "4.4.2"]
-    success = False
-    
-    for version in target_versions:
-        print(f"Attempting to lock to version: {version}...")
-        result = subprocess.run(["git", "checkout", version], cwd=manager_dir, capture_output=True, text=True)
-        if result.returncode == 0:
-            print(f"✅ Successfully locked ComfyUI-Manager to exact version: {version}")
-            success = True
-            break
-            
-    if not success:
-        print("⚠️ WARNING: Could not find tag 'v4.4.2' or '4.4.2'.")
-        print("   Falling back to the main branch. Check GitHub releases for the exact tag format.")
-        run(["git", "checkout", "main"], cwd=manager_dir, check=False)
+    print("Cloning fresh copy of ComfyUI-Manager from Comfy-Org (main branch)...")
+    run(["git", "clone", "https://github.com/Comfy-Org/ComfyUI-Manager.git", manager_dir])
 
     print("\n=== Step 3: Creating venv ===")
     if not os.path.isdir(VENV_DIR):
@@ -178,8 +148,6 @@ def main():
         run([PIP_BIN, "install", "-r", manager_requirements])
 
     print("\n=== Done ===")
-    print("Launch with:")
-    print(f"  {PYTHON_BIN} {os.path.join(COMFY_DIR, 'main.py')} --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui")
 
 if __name__ == "__main__":
     main()
