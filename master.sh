@@ -54,8 +54,7 @@ run_task_background() {
 # ==========================================
 # 🚀 FETCH SCRIPTS FROM GITHUB REPO
 # ==========================================
-# ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO_NAME' WITH YOUR ACTUAL GITHUB INFO!
-REPO_RAW_BASE="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main"
+REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Fetching provisioning scripts from GitHub Repo..."
 SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_loras.py" "install_sageattention.py" "install_missing_nodes.py")
@@ -63,7 +62,6 @@ SCRIPTS=("install_comfyui.py" "install_nodes.py" "download_models.py" "download_
 for script in "${SCRIPTS[@]}"; do
     curl -sL "$REPO_RAW_BASE/scripts/$script" -o "/tmp/$script"
     
-    # SAFETY CHECK: Did we accidentally download a 404 page?
     if [ ! -s "/tmp/$script" ] || grep -q "404: Not Found" "/tmp/$script"; then
         echo "❌ CRITICAL ERROR: Failed to download $script" | tee -a /workspace/provisioning.log
         exit 1
@@ -76,6 +74,16 @@ done
 # ==========================================
 run_task_foreground "Installing ComfyUI Core" "/tmp/install_comfyui.py"
 
+# 🔧 FIX: Allow ComfyUI-Manager CLI to install nodes without the 0.0.0.0 security block
+MANAGER_CONFIG="/workspace/ComfyUI/custom_nodes/ComfyUI-Manager/config.ini"
+if [ -f "$MANAGER_CONFIG" ]; then
+    sed -i 's/allow_git_url_install = False/allow_git_url_install = True/g' "$MANAGER_CONFIG"
+    if ! grep -q "allow_git_url_install" "$MANAGER_CONFIG"; then
+        sed -i '/^\[default\]/a allow_git_url_install = True' "$MANAGER_CONFIG"
+    fi
+    echo "✅ ComfyUI-Manager config updated to allow CLI installations." | tee -a /workspace/provisioning.log
+fi
+
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "⏳ STARTING: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
@@ -86,6 +94,10 @@ echo "✅ Workflow downloaded successfully!" | tee -a /workspace/provisioning.lo
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "✅ COMPLETED: Downloading Custom Workflow" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
+
+# 🔧 FIX: Run Missing Nodes installation BEFORE launching ComfyUI to avoid the security block
+run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
+
 # ==========================================
 # 🚀 PHASE 1.5: APPLY GLOBAL COMFYUI SETTINGS
 # ==========================================
@@ -93,18 +105,15 @@ echo "============================================================" | tee -a /wo
 echo "⏳ STARTING: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
-# Ensure the user settings directory exists
 SETTINGS_DIR="/workspace/ComfyUI/user/default"
 mkdir -p "$SETTINGS_DIR"
-
-# Download your custom settings file from the GitHub repo
-# (If your file is in the root of the repo instead of a 'config' folder, remove '/config' from the URL)
 curl -sL "$REPO_RAW_BASE/config/comfy.settings.json" -o "$SETTINGS_DIR/comfy.settings.json"
 
 echo "✅ Global settings applied successfully!" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "✅ COMPLETED: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
+
 # ==========================================
 # 🚀 PHASE 2: EARLY LAUNCH
 # ==========================================
@@ -120,16 +129,29 @@ echo "✅ COMPLETED: Launching ComfyUI EARLY" | tee -a /workspace/provisioning.l
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 # ==========================================
-# 🚀 PHASE 3: MISSING NODES & BACKGROUND TASKS
+# 🚀 PHASE 3: BACKGROUND TASKS
 # ==========================================
-run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
-
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "⏳ STARTING: Background Tasks" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
 
 (
     run_task_background "Installing Custom Nodes" "/tmp/install_nodes.py" "/workspace/nodes_install.log"
+    
+    echo "============================================================"
+    echo "⏳ STARTING: Patching ComfyUI-QwenVL-Mod"
+    echo "============================================================"
+    TARGET_FILE="/workspace/ComfyUI/custom_nodes/ComfyUI-QwenVL-Mod/AILab_QwenVL.py"
+    mkdir -p "$(dirname "$TARGET_FILE")"
+    curl -sL "$REPO_RAW_BASE/patches/AILab_QwenVL.py" -o "$TARGET_FILE"
+    
+    if [ -s "$TARGET_FILE" ] && ! grep -q "404: Not Found" "$TARGET_FILE"; then
+        echo "✅ Custom AILab_QwenVL.py applied successfully!"
+    else
+        echo "⚠️ WARNING: Failed to apply patch. File might be missing in repo."
+    fi
+    echo "============================================================"
+    
     run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"
     run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
     run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
@@ -167,7 +189,7 @@ echo "============================================================" | tee -a /wo
 echo "============================================================" | tee -a /workspace/provisioning.log
 echo "🎉 ALL DONE!" | tee -a /workspace/provisioning.log
 echo "✅ ComfyUI is now running with SageAttention acceleration." | tee -a /workspace/provisioning.log
-echo "✅ All models, LoRAs, and missing nodes are fully installed." | tee -a /workspace/provisioning.log
+echo "✅ All models, LoRAs, missing nodes, and custom patches are fully installed." | tee -a /workspace/provisioning.log
 echo "🔍 Main log: /workspace/provisioning.log" | tee -a /workspace/provisioning.log
 echo "🔍 Detailed background logs: /workspace/*.log" | tee -a /workspace/provisioning.log
 echo "============================================================" | tee -a /workspace/provisioning.log
