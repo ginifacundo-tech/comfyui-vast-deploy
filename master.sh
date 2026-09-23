@@ -18,7 +18,6 @@ is_enabled() {
     local var_name="$1"
     local default_val="${2:-true}"
     local val="${!var_name:-$default_val}"
-    # Convert to lowercase for safe comparison
     val=$(echo "$val" | tr '[:upper:]' '[:lower:]')
     [[ "$val" == "true" || "$val" == "1" || "$val" == "yes" ]]
 }
@@ -59,7 +58,8 @@ run_task_background() {
 # ==========================================
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
-REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
+# ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO_NAME' WITH YOUR ACTUAL GITHUB INFO!
+REPO_RAW_BASE="https://raw.githubusercontent.com/YOUR_USERNAME/YOUR_REPO_NAME/main"
 
 echo "🚀 Evaluating enabled scripts..."
 SCRIPTS_TO_DOWNLOAD=()
