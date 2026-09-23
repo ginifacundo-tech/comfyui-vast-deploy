@@ -13,16 +13,16 @@ if not HF_TOKEN:
 print("📦 Installing hf_transfer...")
 subprocess.run([PYTHON, "-m", "pip", "install", "hf_transfer", "huggingface_hub", "--upgrade", "--quiet"], check=True)
 os.environ["HF_HUB_ENABLE_HF_TRANSFER"] = "1"
-if HF_TOKEN: 
+if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
 
 import hf_transfer
-print(f"✅ hf_transfer installed")
+print(f"✅ hf_transfer {getattr(hf_transfer, '__version__', 'unknown')} installed")
 if HF_TOKEN:
     from huggingface_hub import HfApi
-    try: 
+    try:
         print(f"✅ Authenticated as: {HfApi().whoami(token=HF_TOKEN)['name']}")
-    except Exception as e: 
+    except Exception as e:
         print(f"⚠️ Token verification failed: {e}")
 
 MODELS = [
@@ -44,6 +44,6 @@ for model in MODELS:
         path = hf_hub_download(repo_id=model["repo"], filename=model["filename"], local_dir=str(dest_dir), resume_download=True, token=HF_TOKEN if HF_TOKEN else None)
         size_gb = Path(path).stat().st_size / (1024**3)
         print(f"✅ Downloaded: {Path(path).name} ({size_gb:.1f} GB)")
-    except Exception as e: 
+    except Exception as e:
         print(f"❌ Failed: {e}")
 print("\n🎉 All HF downloads complete!")
