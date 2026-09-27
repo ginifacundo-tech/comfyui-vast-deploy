@@ -23,6 +23,11 @@ LORAS_TO_DOWNLOAD = [
     ("Minimaxh3-Licking_Balls_and_Penis-Ref2V-512_000000552.safetensors", "3265246", "3148884"),
     ("cum_facial_000005400.safetensors", "3290361", "3174815"),
     ("Titjob - Titfuck v0.95.safetensors", "3264280", "3147835"),
+    ("HMCumshot_V1.0.safetensors", "2857340", "3215616"),
+    ("HMNSFW-AIO-V2.5.safetensors", "2834417", "3152083"),
+    ("H3_slop_bounce.safetensors", "2876282", "3137071"),
+    ("PenisV2_minimax-h3_epoch60.safetensors", "2849923", "3130327"),
+    #("filename", "model_id", "file_id"),
 ]
 
 print("🚀 Starting Lora downloads...")
