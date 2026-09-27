@@ -36,12 +36,12 @@ if HF_TOKEN:
 # 📦 MODEL DEFINITIONS & ENV VAR TOGGLES
 # ==========================================
 MODELS = [
-    {
-        "env_var": "DOWNLOAD_MINIMAX_H3_DIFFUSION",
-        "repo": "Comfy-Org/MiniMax-H3", 
-        "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", 
-        "dest": f"{COMFYUI_DIR}/models/"
-    },
+   # {
+   #     "env_var": "DOWNLOAD_MINIMAX_H3_DIFFUSION",
+    #    "repo": "Comfy-Org/MiniMax-H3", 
+     #   "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", 
+      #  "dest": f"{COMFYUI_DIR}/models/"
+   # },
     {
         "env_var": "DOWNLOAD_QWEN3_VL_TEXT_ENCODER",
         "repo": "ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot", 
@@ -73,10 +73,10 @@ MODELS = [
         "dest": f"{COMFYUI_DIR}/models/"
     },
     {
-        "env_var": "SET_ENV_VAR",
-        "repo": "REPO", 
-        "filename": "FILENAME", 
-        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
+        "env_var": "DOWNLOAD_MINIMAX_H3_SINGULARITY",
+        "repo": "WarmBloodAban/Minimax-h3_Singularity", 
+        "filename": "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors", 
+        "dest": f"{COMFYUI_DIR}/models/diffusion_models/"
     },
     {
         "env_var": "SET_ENV_VAR",
@@ -88,7 +88,7 @@ MODELS = [
         "env_var": "SET_ENV_VAR",
         "repo": "REPO", 
         "filename": "FILENAME", 
-        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
+        "dest": f"{COMFYUI_DIR}/models/DESTINATION_FOLDER/"
     },
 ]
 
