@@ -19,7 +19,7 @@
         "pinned": true
       },
       "order": 0,
-      "mode": 4,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -48,11 +48,11 @@
         }
       },
       "widgets_values": [
-        "655027515_18004605941714390_8480521363770017203_n.jpg",
+        "1000385964.jpg",
         "image"
       ],
       "widgets_values_named": {
-        "image": "655027515_18004605941714390_8480521363770017203_n.jpg",
+        "image": "1000385964.jpg",
         "upload": "image"
       },
       "color": "#232",
@@ -132,7 +132,7 @@
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 19,
-        "save_metadata": false,
+        "save_metadata": true,
         "trim_to_audio": false,
         "pingpong": false,
         "save_output": true,
@@ -140,13 +140,13 @@
           "hidden": true,
           "paused": false,
           "params": {
-            "filename": "MiniMaxH3_00007-audio.mp4",
+            "filename": "MiniMaxH3_00003-audio.mp4",
             "subfolder": "",
             "type": "output",
             "format": "video/h264-mp4",
             "frame_rate": 24,
-            "workflow": "MiniMaxH3_00007.png",
-            "fullpath": "/workspace/ComfyUI/output/MiniMaxH3_00007-audio.mp4"
+            "workflow": "MiniMaxH3_00003.png",
+            "fullpath": "/workspace/ComfyUI/output/MiniMaxH3_00003-audio.mp4"
           }
         }
       },
@@ -157,7 +157,7 @@
         "format": "video/h264-mp4",
         "pix_fmt": "yuv420p",
         "crf": 19,
-        "save_metadata": false,
+        "save_metadata": true,
         "trim_to_audio": false,
         "pingpong": false,
         "save_output": true,
@@ -165,13 +165,13 @@
           "hidden": true,
           "paused": false,
           "params": {
-            "filename": "MiniMaxH3_00007-audio.mp4",
+            "filename": "MiniMaxH3_00003-audio.mp4",
             "subfolder": "",
             "type": "output",
             "format": "video/h264-mp4",
             "frame_rate": 24,
-            "workflow": "MiniMaxH3_00007.png",
-            "fullpath": "/workspace/ComfyUI/output/MiniMaxH3_00007-audio.mp4"
+            "workflow": "MiniMaxH3_00003.png",
+            "fullpath": "/workspace/ComfyUI/output/MiniMaxH3_00003-audio.mp4"
           }
         }
       },
@@ -187,13 +187,13 @@
       ],
       "size": [
         335.109375,
-        310
+        718.1368055555556
       ],
       "flags": {
         "pinned": true
       },
       "order": 50,
-      "mode": 4,
+      "mode": 0,
       "inputs": [
         {
           "name": "meta_batch",
@@ -247,8 +247,8 @@
         "aux_id": "Kosinkadink/ComfyUI-VideoHelperSuite"
       },
       "widgets_values": {
-        "video": "Veo demo _ Flamingos.mp4",
-        "force_rate": 24,
+        "video": "1000385892.mp4",
+        "force_rate": 25,
         "custom_width": 0,
         "custom_height": 0,
         "frame_load_cap": 0,
@@ -260,10 +260,10 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "Veo demo _ Flamingos.mp4",
+            "filename": "1000385892.mp4",
             "type": "input",
             "format": "video/mp4",
-            "force_rate": 24,
+            "force_rate": 25,
             "custom_width": 0,
             "custom_height": 512,
             "frame_load_cap": 0,
@@ -273,8 +273,8 @@
         }
       },
       "widgets_values_named": {
-        "video": "Veo demo _ Flamingos.mp4",
-        "force_rate": 24,
+        "video": "1000385892.mp4",
+        "force_rate": 25,
         "custom_width": 0,
         "custom_height": 0,
         "frame_load_cap": 0,
@@ -286,10 +286,10 @@
           "hidden": false,
           "paused": false,
           "params": {
-            "filename": "Veo demo _ Flamingos.mp4",
+            "filename": "1000385892.mp4",
             "type": "input",
             "format": "video/mp4",
-            "force_rate": 24,
+            "force_rate": 25,
             "custom_width": 0,
             "custom_height": 512,
             "frame_load_cap": 0,
@@ -316,7 +316,7 @@
         "pinned": true
       },
       "order": 1,
-      "mode": 4,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -347,11 +347,11 @@
         }
       },
       "widgets_values": [
-        "701510071_18586233049028844_3680770947907535268_n.jpg",
+        "1000385965.jpg",
         "image"
       ],
       "widgets_values_named": {
-        "image": "701510071_18586233049028844_3680770947907535268_n.jpg",
+        "image": "1000385965.jpg",
         "upload": "image"
       },
       "color": "#232",
@@ -449,12 +449,12 @@
       },
       "widgets_values": [
         "simple",
-        2,
+        6,
         1
       ],
       "widgets_values_named": {
         "scheduler": "simple",
-        "steps": 2,
+        "steps": 6,
         "denoise": 1
       },
       "color": "#232",
@@ -726,9 +726,7 @@
         712.796875,
         1145.203125
       ],
-      "flags": {
-        "collapsed": true
-      },
+      "flags": {},
       "order": 83,
       "mode": 0,
       "inputs": [
@@ -762,14 +760,14 @@
       "widgets_values": [
         [
           {
-            "name": "A1",
+            "name": "A",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_ssmpj_00057_.png&type=temp&subfolder=&rand=0.06676164224064163"
+            "url": "/api/view?filename=rgthree.compare._temp_depkf_00005_.png&type=temp&subfolder=&rand=0.3616958669478606"
           },
           {
-            "name": "A2",
+            "name": "B",
             "selected": true,
-            "url": "/api/view?filename=rgthree.compare._temp_ssmpj_00058_.png&type=temp&subfolder=&rand=0.9619887462103729"
+            "url": "/api/view?filename=rgthree.compare._temp_depkf_00006_.png&type=temp&subfolder=&rand=0.722390642502928"
           }
         ]
       ],
@@ -777,15 +775,15 @@
         "rgthree_comparer": {
           "images": [
             {
-              "name": "A1",
+              "name": "A",
               "selected": true,
-              "url": "/api/view?filename=rgthree.compare._temp_ssmpj_00057_.png&type=temp&subfolder=&rand=0.06676164224064163",
+              "url": "/api/view?filename=rgthree.compare._temp_depkf_00005_.png&type=temp&subfolder=&rand=0.3616958669478606",
               "img": {}
             },
             {
-              "name": "A2",
+              "name": "B",
               "selected": true,
-              "url": "/api/view?filename=rgthree.compare._temp_ssmpj_00058_.png&type=temp&subfolder=&rand=0.9619887462103729",
+              "url": "/api/view?filename=rgthree.compare._temp_depkf_00006_.png&type=temp&subfolder=&rand=0.722390642502928",
               "img": {}
             }
           ]
@@ -809,7 +807,7 @@
         "pinned": true
       },
       "order": 6,
-      "mode": 4,
+      "mode": 0,
       "inputs": [],
       "outputs": [
         {
@@ -837,11 +835,11 @@
         }
       },
       "widgets_values": [
-        "650210960_18568819384028844_50935861094224275_n.jpg",
+        "1000385960.jpg",
         "image"
       ],
       "widgets_values_named": {
-        "image": "650210960_18568819384028844_50935861094224275_n.jpg",
+        "image": "1000385960.jpg",
         "upload": "image"
       },
       "color": "#232",
@@ -1259,10 +1257,10 @@
         "aux_id": "yolain/ComfyUI-Easy-Use"
       },
       "widgets_values": [
-        "2.3333333333333335"
+        "5.166666666666667"
       ],
       "widgets_values_named": {
-        "text": "2.3333333333333335"
+        "text": "5.166666666666667"
       },
       "color": "#2a363b",
       "bgcolor": "#3f5159"
@@ -1532,7 +1530,7 @@
         "pinned": true
       },
       "order": 68,
-      "mode": 4,
+      "mode": 0,
       "inputs": [
         {
           "name": "model",
@@ -2486,7 +2484,7 @@
         4511.846576469033
       ],
       "size": [
-        249.1001953125,
+        249.4,
         454
       ],
       "flags": {
@@ -3002,7 +3000,7 @@
         6289.114236665336
       ],
       "size": [
-        302.91953125,
+        303.2181762695312,
         54
       ],
       "flags": {
@@ -3832,7 +3830,7 @@
         6139.106641999799
       ],
       "size": [
-        255.86665954589844,
+        226.578125,
         62
       ],
       "flags": {
@@ -4161,7 +4159,7 @@
       ],
       "outputs": [
         {
-          "name": "MODEL",
+          "name": "model",
           "type": "MODEL",
           "links": [
             587
@@ -4170,10 +4168,10 @@
       ],
       "title": "MiniMax H3 Mem Eff Sage",
       "properties": {
-        "aux_id": "kijai/ComfyUI-KJNodes",
+        "cnr_id": "comfyui-kjnodes",
         "ver": "1289b52fbb6d64a339a4047b9ea74cf7758ccf1e",
         "Node name for S&R": "MiniMaxH3MemoryEfficientSageAttentionPatch",
-        "cnr_id": "comfyui-kjnodes",
+        "aux_id": "kijai/ComfyUI-KJNodes",
         "ue_properties": {
           "widget_ue_connectable": {},
           "version": "7.8",
@@ -4433,7 +4431,7 @@
       ],
       "size": [
         512.8164519975915,
-        149
+        153
       ],
       "flags": {
         "pinned": true
@@ -4541,7 +4539,7 @@
       ],
       "size": [
         258.3970703125,
-        336
+        404
       ],
       "flags": {
         "pinned": true
@@ -4572,6 +4570,11 @@
             382,
             384
           ]
+        },
+        {
+          "name": "RESOLUTION",
+          "type": "INT",
+          "links": null
         }
       ],
       "properties": {
@@ -4586,14 +4589,14 @@
         "last_preset": "16:9 (Panorama)"
       },
       "widgets_values": [
-        0.2,
+        0.5,
         "Custom",
         "32",
         true,
         "721:892"
       ],
       "widgets_values_named": {
-        "megapixel": 0.2,
+        "megapixel": 0.5,
         "aspect_ratio": "Custom",
         "divisible_by": "32",
         "custom_ratio": true,
@@ -4747,7 +4750,7 @@
       ],
       "size": [
         300,
-        98
+        99
       ],
       "flags": {
         "pinned": true
@@ -5036,7 +5039,7 @@
       ],
       "size": [
         329.84375,
-        98
+        99
       ],
       "flags": {
         "collapsed": false
@@ -5534,7 +5537,7 @@
       ],
       "size": [
         353.328125,
-        98
+        99
       ],
       "flags": {},
       "order": 38,
@@ -5626,7 +5629,7 @@
       ],
       "size": [
         526.484375,
-        154
+        153
       ],
       "flags": {},
       "order": 39,
@@ -5653,11 +5656,11 @@
         "aux_id": "AcademiaSD/comfyui_AcademiaSD"
       },
       "widgets_values": [
-        "{\"side\":\"b\",\"labels\":{\"a\":\"FL2VA\",\"b\":\"Ref2VA\"},\"folder\":\"models/diffusion_models\",\"a\":\"minimax_h3_fl2va_pruned_int8_convrot.safetensors\",\"b\":\"minimax_h3_ref2va_pruned_int8_convrot.safetensors\",\"opts\":{\"shareLabels\":true},\"link\":\"342\"}",
+        "{\"side\":\"b\",\"labels\":{\"a\":\"FL2VA\",\"b\":\"Ref2VA\"},\"folder\":\"models/diffusion_models\",\"a\":\"minimax_h3_fl2va_pruned_int8_convrot.safetensors\",\"b\":\"Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors\",\"opts\":{\"shareLabels\":true},\"link\":\"342\"}",
         ""
       ],
       "widgets_values_named": {
-        "switch_data": "{\"side\":\"b\",\"labels\":{\"a\":\"FL2VA\",\"b\":\"Ref2VA\"},\"folder\":\"models/diffusion_models\",\"a\":\"minimax_h3_fl2va_pruned_int8_convrot.safetensors\",\"b\":\"minimax_h3_ref2va_pruned_int8_convrot.safetensors\",\"opts\":{\"shareLabels\":true},\"link\":\"342\"}",
+        "switch_data": "{\"side\":\"b\",\"labels\":{\"a\":\"FL2VA\",\"b\":\"Ref2VA\"},\"folder\":\"models/diffusion_models\",\"a\":\"minimax_h3_fl2va_pruned_int8_convrot.safetensors\",\"b\":\"Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors\",\"opts\":{\"shareLabels\":true},\"link\":\"342\"}",
         "AFS": ""
       },
       "color": "#323",
@@ -5672,7 +5675,7 @@
       ],
       "size": [
         520,
-        178
+        216
       ],
       "flags": {},
       "order": 67,
@@ -5712,12 +5715,12 @@
       },
       "widgets_values": [
         "Model Only (No CLIP)",
-        "[{\"enabled\":true,\"name\":\"Titjob - Titfuck v0.95.safetensors\",\"strength\":1}]",
+        "[{\"enabled\":true,\"name\":\"Titjob - Titfuck v0.95.safetensors\",\"strength\":1},{\"enabled\":true,\"name\":\"HMCumshot_V1.0.safetensors\",\"strength\":0.9}]",
         ""
       ],
       "widgets_values_named": {
         "injection_method": "Model Only (No CLIP)",
-        "lora_data": "[{\"enabled\":true,\"name\":\"Titjob - Titfuck v0.95.safetensors\",\"strength\":1}]",
+        "lora_data": "[{\"enabled\":true,\"name\":\"Titjob - Titfuck v0.95.safetensors\",\"strength\":1},{\"enabled\":true,\"name\":\"HMCumshot_V1.0.safetensors\",\"strength\":0.9}]",
         "UI": ""
       },
       "color": "#323",
@@ -5754,10 +5757,10 @@
         "Node name for S&R": "PrimitiveFloat"
       },
       "widgets_values": [
-        2
+        5
       ],
       "widgets_values_named": {
-        "value": 2
+        "value": 5
       },
       "color": "#232",
       "bgcolor": "#353"
@@ -5793,27 +5796,27 @@
         "ver": "eadad201b5df04fa8a185784d49829064d806fb8",
         "Node name for S&R": "AcademiaSD_Noise",
         "seed_history": [
-          3019998743437575,
-          2555981857582300,
-          8698571869718640,
-          3257229727704417,
           1410462367240684,
           3061840444235037,
           3608898387938246,
           1748367425012558,
           1873211076429309,
-          8196186210103847
+          8196186210103847,
+          6545927898074374,
+          7590433125692453,
+          4677703416293059,
+          296705714154342
         ],
         "aux_id": "AcademiaSD/comfyui_AcademiaSD"
       },
       "widgets_values": [
-        3019998743437575,
-        "randomize",
+        1410462367240684,
+        "fixed",
         ""
       ],
       "widgets_values_named": {
-        "seed_val": 3019998743437575,
-        "mode": "randomize",
+        "seed_val": 1410462367240684,
+        "mode": "fixed",
         "UI": ""
       },
       "color": "#232",
@@ -5872,11 +5875,11 @@
         "aux_id": "AcademiaSD/comfyui_AcademiaSD"
       },
       "widgets_values": [
-        "A girl from the is titty fucking a penis. She is with a male partner and is putting his penis between her breasts. \nShe is laying down on what appears to be a bed. The man is above her and has is penis tucked between her breasts as he slides the penis up and down in her cleavage.\nHer face depicts pleasue and remains on frame throughout she scene. She is looking at the camera.\nSoundscape: She softly moans with her lips shut",
+        "Use the woman featured in the provided reference images/video as the primary character throughout all generated content. Maintain perfect identity consistency by preserving her exact facial features, including eye shape and color, nose structure, lip shape, jawline, hairstyle, hair color, and skin tone across every frame and scene. Keep her body proportions, physique, height, and build identical to the reference material at all times. Do not alter, stylize, or reinterpret her appearance in any way — she must remain visually indistinguishable from the reference source. Any clothing, accessories, or environmental changes should be applied while keeping her core physical identity completely intact and recognizable.\nThe girl from the reference images is titty fucking a penis. She is with a male partner and is putting his penis between her breasts. \nShe is laying down on a bed. The man is above her and has is penis tucked between her breasts as he slides the penis back and forth in her intensely lubed cleavage.\nhmcumshot3, he shoots a big load of thick white cum from his cock. White trcum shoots from the penis and drips between her breasts.\n.anslucent Soundscape: She softly moans with her lips shut",
         ""
       ],
       "widgets_values_named": {
-        "text": "A girl from the is titty fucking a penis. She is with a male partner and is putting his penis between her breasts. \nShe is laying down on what appears to be a bed. The man is above her and has is penis tucked between her breasts as he slides the penis up and down in her cleavage.\nHer face depicts pleasue and remains on frame throughout she scene. She is looking at the camera.\nSoundscape: She softly moans with her lips shut",
+        "text": "Use the woman featured in the provided reference images/video as the primary character throughout all generated content. Maintain perfect identity consistency by preserving her exact facial features, including eye shape and color, nose structure, lip shape, jawline, hairstyle, hair color, and skin tone across every frame and scene. Keep her body proportions, physique, height, and build identical to the reference material at all times. Do not alter, stylize, or reinterpret her appearance in any way — she must remain visually indistinguishable from the reference source. Any clothing, accessories, or environmental changes should be applied while keeping her core physical identity completely intact and recognizable.\nThe girl from the reference images is titty fucking a penis. She is with a male partner and is putting his penis between her breasts. \nShe is laying down on a bed. The man is above her and has is penis tucked between her breasts as he slides the penis back and forth in her intensely lubed cleavage.\nhmcumshot3, he shoots a big load of thick white cum from his cock. White trcum shoots from the penis and drips between her breasts.\n.anslucent Soundscape: She softly moans with her lips shut",
         "UI": ""
       },
       "color": "#232",
@@ -5935,6 +5938,14 @@
       150,
       0,
       "IMAGE"
+    ],
+    [
+      311,
+      162,
+      1,
+      143,
+      4,
+      "FLOAT"
     ],
     [
       314,
@@ -6153,6 +6164,14 @@
       "IMAGE"
     ],
     [
+      467,
+      247,
+      0,
+      143,
+      0,
+      "IMAGE"
+    ],
+    [
       488,
       131,
       1,
@@ -6214,6 +6233,14 @@
       0,
       278,
       0,
+      "AUDIO"
+    ],
+    [
+      520,
+      278,
+      0,
+      143,
+      1,
       "AUDIO"
     ],
     [
@@ -6799,30 +6826,6 @@
       136,
       23,
       "IMAGE"
-    ],
-    [
-      467,
-      247,
-      0,
-      143,
-      0,
-      "IMAGE"
-    ],
-    [
-      520,
-      278,
-      0,
-      143,
-      1,
-      "AUDIO"
-    ],
-    [
-      311,
-      162,
-      1,
-      143,
-      4,
-      "FLOAT"
     ]
   ],
   "groups": [
@@ -7168,16 +7171,16 @@
   "config": {},
   "extra": {
     "ds": {
-      "scale": 0.7400249944258173,
+      "scale": 1.3261436102537163,
       "offset": [
-        1923.5148861014864,
-        -4810.53150035382
+        2332.7423141173076,
+        -6232.011836083243
       ]
     },
-    "frontendVersion": "1.53.6",
+    "frontendVersion": "1.53.10",
     "VHS_latentpreview": false,
     "VHS_latentpreviewrate": 0,
-    "VHS_MetadataImage": false,
+    "VHS_MetadataImage": true,
     "VHS_KeepIntermediate": true,
     "anomalous_hashes": {
       "120_minimax_h3_audio_vae_fp32.safetensors": {
