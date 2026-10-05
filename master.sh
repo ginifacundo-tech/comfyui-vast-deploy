@@ -13,7 +13,6 @@ mkdir -p /workspace
 # ==========================================
 # 🛠️ HELPER FUNCTIONS & ENV VAR PARSING
 # ==========================================
-# Helper to check if an environment variable is enabled (defaults to true if not set)
 is_enabled() {
     local var_name="$1"
     local default_val="${2:-true}"
@@ -58,7 +57,7 @@ run_task_background() {
 # ==========================================
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
-# ⚠️ REPLACE 'YOUR_USERNAME' AND 'YOUR_REPO_NAME' WITH YOUR ACTUAL GITHUB INFO!
+# Note: Updated to your actual GitHub repo based on previous context
 REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Evaluating enabled scripts..."
@@ -68,6 +67,7 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then SCRIPTS_TO_DOWNLOAD+=("install_comf
 if is_enabled "ENABLE_INSTALL_NODES"; then SCRIPTS_TO_DOWNLOAD+=("install_nodes.py"); fi
 if is_enabled "ENABLE_DOWNLOAD_MODELS"; then SCRIPTS_TO_DOWNLOAD+=("download_models.py"); fi
 if is_enabled "ENABLE_DOWNLOAD_LORAS"; then SCRIPTS_TO_DOWNLOAD+=("download_loras.py"); fi
+if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then SCRIPTS_TO_DOWNLOAD+=("download_qwen_image.py"); fi
 if is_enabled "ENABLE_SAGEATTENTION"; then SCRIPTS_TO_DOWNLOAD+=("install_sageattention.py"); fi
 if is_enabled "ENABLE_MISSING_NODES"; then SCRIPTS_TO_DOWNLOAD+=("install_missing_nodes.py"); fi
 
@@ -83,24 +83,72 @@ for script in "${SCRIPTS_TO_DOWNLOAD[@]}"; do
 done
 
 # ==========================================
-# 🚀 PHASE 1: CORE SETUP & WORKFLOW
+# 🚀 PHASE 1: CORE SETUP & DYNAMIC WORKFLOWS
 # ==========================================
 if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     run_task_foreground "Installing ComfyUI Core" "/tmp/install_comfyui.py"
     
     echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "⏳ STARTING: Downloading Custom Workflow & Settings" | tee -a /workspace/provisioning.log
+    echo "⏳ STARTING: Downloading All Workflows from Repo" | tee -a /workspace/provisioning.log
     echo "============================================================" | tee -a /workspace/provisioning.log
     
     WORKFLOW_DIR="/workspace/ComfyUI/user/default/workflows"
     mkdir -p "$WORKFLOW_DIR"
-    curl -sL "$REPO_RAW_BASE/workflows/workflow_academia.json" -o "$WORKFLOW_DIR/workflow_academia.json"
+
+    # Use Python to query the GitHub API and download all .json files dynamically
+    python3 -c "
+import urllib.request
+import json
+import os
+import re
+
+repo_raw_base = '$REPO_RAW_BASE'
+match = re.search(r'githubusercontent\.com/([^/]+/[^/]+)/', repo_raw_base)
+if not match:
+    print('⚠️ Could not parse repo info from REPO_RAW_BASE')
+    exit(1)
+    
+repo_path = match.group(1)
+api_url = f'https://api.github.com/repos/{repo_path}/contents/workflows'
+
+try:
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'ComfyUI-Deploy-Script'})
+    with urllib.request.urlopen(req) as response:
+        data = json.loads(response.read().decode())
+        files = [item['name'] for item in data if item['name'].endswith('.json') and item['type'] == 'file']
+        
+        if not files:
+            print('⚠️ No .json workflows found in the repo workflows directory.')
+        else:
+            os.makedirs('$WORKFLOW_DIR', exist_ok=True)
+            for f in files:
+                print(f'⬇️ Downloading workflow: {f}')
+                url = f'{repo_raw_base}/workflows/{f}'
+                urllib.request.urlretrieve(url, os.path.join('$WORKFLOW_DIR', f))
+            print('✅ All workflows downloaded successfully!')
+except urllib.error.HTTPError as e:
+    if e.code == 404:
+        print('⚠️ Workflows directory not found in the repository.')
+    else:
+        print(f'⚠️ Failed to fetch workflows: {e}')
+except Exception as e:
+    print(f'⚠️ Failed to fetch workflows: {e}')
+" | tee -a /workspace/provisioning.log
+
+    echo "============================================================" | tee -a /workspace/provisioning.log
+    echo "✅ COMPLETED: Downloading All Workflows from Repo" | tee -a /workspace/provisioning.log
+    echo "============================================================" | tee -a /workspace/provisioning.log
+
+    # Apply Global Settings
+    echo "============================================================" | tee -a /workspace/provisioning.log
+    echo "⏳ STARTING: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
+    echo "============================================================" | tee -a /workspace/provisioning.log
     
     SETTINGS_DIR="/workspace/ComfyUI/user/default"
     mkdir -p "$SETTINGS_DIR"
     curl -sL "$REPO_RAW_BASE/config/comfy.settings.json" -o "$SETTINGS_DIR/comfy.settings.json"
     
-    echo "✅ Workflow and Settings applied!" | tee -a /workspace/provisioning.log
+    echo "✅ Global settings applied successfully!" | tee -a /workspace/provisioning.log
     echo "============================================================" | tee -a /workspace/provisioning.log
 fi
 
@@ -144,6 +192,10 @@ echo "============================================================" | tee -a /wo
         run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
     fi
     
+    if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then
+        run_task_background "Downloading Qwen Image Models" "/tmp/download_qwen_image.py" "/workspace/qwen_image_download.log"
+    fi
+    
     if is_enabled "ENABLE_SAGEATTENTION"; then
         run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
     fi
@@ -172,7 +224,6 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     kill $COMFY_PID 2>/dev/null || pkill -f "/workspace/ComfyUI/main.py"
     sleep 3
 
-    # Dynamically build launch flags based on enabled scripts
     LAUNCH_FLAGS="--listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui"
     if is_enabled "ENABLE_SAGEATTENTION"; then
         LAUNCH_FLAGS="$LAUNCH_FLAGS --use-sage-attention"
