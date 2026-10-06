@@ -1,7 +1,6 @@
 #!/bin/bash
 set -eo pipefail
 
-# SAFETY: Wait for Vast.ai to finish mounting the /workspace directory
 for i in {1..15}; do
     if [ -d "/workspace" ]; then break; fi
     sleep 2
@@ -57,6 +56,8 @@ run_task_background() {
 # ==========================================
 # 🛠️ INSTALL HELPER CLI TOOLS
 # ==========================================
+REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
+
 echo "🛠️ Installing helper CLI tools..."
 curl -sL "$REPO_RAW_BASE/verprogreso.sh" -o /usr/local/bin/verprogreso
 chmod +x /usr/local/bin/verprogreso
@@ -65,8 +66,6 @@ echo "✅ 'verprogreso' command installed globally." | tee -a /workspace/provisi
 # ==========================================
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
-REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
-
 echo "🚀 Evaluating enabled scripts..."
 SCRIPTS_TO_DOWNLOAD=()
 
@@ -81,7 +80,6 @@ if is_enabled "ENABLE_MISSING_NODES"; then SCRIPTS_TO_DOWNLOAD+=("install_missin
 echo "🚀 Fetching enabled provisioning scripts from GitHub Repo..."
 for script in "${SCRIPTS_TO_DOWNLOAD[@]}"; do
     curl -sL "$REPO_RAW_BASE/scripts/$script" -o "/tmp/$script"
-    
     if [ ! -s "/tmp/$script" ] || grep -q "404: Not Found" "/tmp/$script"; then
         echo "❌ CRITICAL ERROR: Failed to download $script" | tee -a /workspace/provisioning.log
         exit 1
@@ -102,77 +100,40 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     WORKFLOW_DIR="/workspace/ComfyUI/user/default/workflows"
     mkdir -p "$WORKFLOW_DIR"
 
-    # Use Python to query the GitHub API and download all .json files dynamically
     python3 -c "
-import urllib.request
-import json
-import os
-import re
-
+import urllib.request, json, os, re
 repo_raw_base = '$REPO_RAW_BASE'
 match = re.search(r'githubusercontent\.com/([^/]+/[^/]+)/', repo_raw_base)
-if not match:
-    print('⚠️ Could not parse repo info from REPO_RAW_BASE')
-    exit(1)
-    
+if not match: exit(1)
 repo_path = match.group(1)
 api_url = f'https://api.github.com/repos/{repo_path}/contents/workflows'
-
 try:
-    req = urllib.request.Request(api_url, headers={'User-Agent': 'ComfyUI-Deploy-Script'})
+    req = urllib.request.Request(api_url, headers={'User-Agent': 'ComfyUI-Deploy'})
     with urllib.request.urlopen(req) as response:
         data = json.loads(response.read().decode())
         files = [item['name'] for item in data if item['name'].endswith('.json') and item['type'] == 'file']
-        
-        if not files:
-            print('⚠️ No .json workflows found in the repo workflows directory.')
+        if not files: print('⚠️ No .json workflows found.')
         else:
             os.makedirs('$WORKFLOW_DIR', exist_ok=True)
             for f in files:
                 print(f'⬇️ Downloading workflow: {f}')
-                url = f'{repo_raw_base}/workflows/{f}'
-                urllib.request.urlretrieve(url, os.path.join('$WORKFLOW_DIR', f))
-            print('✅ All workflows downloaded successfully!')
-except urllib.error.HTTPError as e:
-    if e.code == 404:
-        print('⚠️ Workflows directory not found in the repository.')
-    else:
-        print(f'⚠️ Failed to fetch workflows: {e}')
-except Exception as e:
-    print(f'⚠️ Failed to fetch workflows: {e}')
+                urllib.request.urlretrieve(f'{repo_raw_base}/workflows/{f}', os.path.join('$WORKFLOW_DIR', f))
+            print('✅ All workflows downloaded!')
+except Exception as e: print(f'⚠️ Failed to fetch workflows: {e}')
 " | tee -a /workspace/provisioning.log
 
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "✅ COMPLETED: Downloading All Workflows from Repo" | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
-
-    # Apply Global Settings
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "⏳ STARTING: Applying Global ComfyUI Settings" | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    
     SETTINGS_DIR="/workspace/ComfyUI/user/default"
     mkdir -p "$SETTINGS_DIR"
     curl -sL "$REPO_RAW_BASE/config/comfy.settings.json" -o "$SETTINGS_DIR/comfy.settings.json"
-    
-    echo "✅ Global settings applied successfully!" | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
 fi
 
 # ==========================================
 # 🚀 PHASE 2: EARLY LAUNCH
 # ==========================================
 if is_enabled "ENABLE_INSTALL_COMFYUI"; then
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "🚀 STARTING: Launching ComfyUI EARLY" | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "💡 You can now open the web UI on port 8188!" | tee -a /workspace/provisioning.log
-    
+    echo "💡 Launching ComfyUI EARLY on port 8188!" | tee -a /workspace/provisioning.log
     nohup /workspace/comfy_venv/bin/python /workspace/ComfyUI/main.py --listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui > /workspace/comfyui_startup.log 2>&1 &
     COMFY_PID=$!
-    
-    echo "✅ ComfyUI is running on port 8188." | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
 fi
 
 # ==========================================
@@ -182,67 +143,26 @@ if is_enabled "ENABLE_MISSING_NODES"; then
     run_task_foreground "Scanning & Installing Missing Nodes" "/tmp/install_missing_nodes.py"
 fi
 
-echo "============================================================" | tee -a /workspace/provisioning.log
-echo "⏳ STARTING: Background Tasks" | tee -a /workspace/provisioning.log
-echo "============================================================" | tee -a /workspace/provisioning.log
-
 (
-    if is_enabled "ENABLE_INSTALL_NODES"; then
-        run_task_background "Installing Custom Nodes" "/tmp/install_nodes.py" "/workspace/nodes_install.log"
-    fi
-    
-    if is_enabled "ENABLE_DOWNLOAD_MODELS"; then
-        run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"
-    fi
-    
-    if is_enabled "ENABLE_DOWNLOAD_LORAS"; then
-        run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"
-    fi
-    
-    if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then
-        run_task_background "Downloading Qwen Image Models" "/tmp/download_qwen_image.py" "/workspace/qwen_image_download.log"
-    fi
-    
-    if is_enabled "ENABLE_SAGEATTENTION"; then
-        run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"
-    fi
-    
-    echo "============================================================"
-    echo "✅ ALL ENABLED BACKGROUND TASKS FINISHED"
-    echo "============================================================"
+    if is_enabled "ENABLE_INSTALL_NODES"; then run_task_background "Installing Custom Nodes" "/tmp/install_nodes.py" "/workspace/nodes_install.log"; fi
+    if is_enabled "ENABLE_DOWNLOAD_MODELS"; then run_task_background "Downloading Models" "/tmp/download_models.py" "/workspace/models_download.log"; fi
+    if is_enabled "ENABLE_DOWNLOAD_LORAS"; then run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"; fi
+    if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then run_task_background "Downloading Qwen Image" "/tmp/download_qwen_image.py" "/workspace/qwen_image_download.log"; fi
+    if is_enabled "ENABLE_SAGEATTENTION"; then run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"; fi
 ) &
 BG_PID=$!
-
-echo "💡 Background tasks are running." | tee -a /workspace/provisioning.log
 
 # ==========================================
 # 🚀 PHASE 4: FINALIZE & RESTART
 # ==========================================
 if is_enabled "ENABLE_INSTALL_COMFYUI"; then
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "⏳ Waiting for background tasks to finish..." | tee -a /workspace/provisioning.log
     wait $BG_PID
-    echo "✅ Background tasks finished!" | tee -a /workspace/provisioning.log
-
-    echo "============================================================" | tee -a /workspace/provisioning.log
-    echo "🔄 STARTING: Restarting ComfyUI with Acceleration" | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
-
     kill $COMFY_PID 2>/dev/null || pkill -f "/workspace/ComfyUI/main.py"
     sleep 3
 
     LAUNCH_FLAGS="--listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui"
-    if is_enabled "ENABLE_SAGEATTENTION"; then
-        LAUNCH_FLAGS="$LAUNCH_FLAGS --use-sage-attention"
-    fi
+    if is_enabled "ENABLE_SAGEATTENTION"; then LAUNCH_FLAGS="$LAUNCH_FLAGS --use-sage-attention"; fi
 
     nohup /workspace/comfy_venv/bin/python /workspace/ComfyUI/main.py $LAUNCH_FLAGS > /workspace/comfyui_startup.log 2>&1 &
-
-    echo "✅ ComfyUI restarted successfully." | tee -a /workspace/provisioning.log
-    echo "============================================================" | tee -a /workspace/provisioning.log
+    echo "🎉 ALL DONE! ComfyUI restarted with final configuration." | tee -a /workspace/provisioning.log
 fi
-
-echo "============================================================" | tee -a /workspace/provisioning.log
-echo "🎉 ALL DONE!" | tee -a /workspace/provisioning.log
-echo "🔍 Main log: /workspace/provisioning.log" | tee -a /workspace/provisioning.log
-echo "============================================================" | tee -a /workspace/provisioning.log
