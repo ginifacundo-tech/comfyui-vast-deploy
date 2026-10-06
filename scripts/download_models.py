@@ -36,12 +36,12 @@ if HF_TOKEN:
 # 📦 MODEL DEFINITIONS & ENV VAR TOGGLES
 # ==========================================
 MODELS = [
-   # {
-   #     "env_var": "DOWNLOAD_MINIMAX_H3_DIFFUSION",
-    #    "repo": "Comfy-Org/MiniMax-H3", 
-     #   "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", 
-      #  "dest": f"{COMFYUI_DIR}/models/"
-   # },
+    {
+        "env_var": "DOWNLOAD_MINIMAX_H3_DIFFUSION",
+        "repo": "Comfy-Org/MiniMax-H3", 
+        "filename": "diffusion_models/minimax_h3_ref2va_pruned_int8_convrot.safetensors", 
+        "dest": f"{COMFYUI_DIR}/models/"
+    },
     {
         "env_var": "DOWNLOAD_QWEN3_VL_TEXT_ENCODER",
         "repo": "ethanfel/Qwen3-VL-32B-Ultra-Heretic-H3-ComfyUI-INT8-ConvRot", 
