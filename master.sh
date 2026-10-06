@@ -55,9 +55,16 @@ run_task_background() {
 }
 
 # ==========================================
+# 🛠️ INSTALL HELPER CLI TOOLS
+# ==========================================
+echo "🛠️ Installing helper CLI tools..."
+curl -sL "$REPO_RAW_BASE/verprogreso.sh" -o /usr/local/bin/verprogreso
+chmod +x /usr/local/bin/verprogreso
+echo "✅ 'verprogreso' command installed globally." | tee -a /workspace/provisioning.log
+
+# ==========================================
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
-# Note: Updated to your actual GitHub repo based on previous context
 REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Evaluating enabled scripts..."
