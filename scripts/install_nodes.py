@@ -13,10 +13,10 @@ CUSTOM_NODES = [
 ]
 
 WORKFLOWS = [
-    {
-        "url": "https://raw.githubusercontent.com/AcademiaSD/comfyui_AcademiaSD/main/example_workflows/AcademiaSD_MiniMax-H3_v24.json",
-        "name": "AcademiaSD_MiniMax-H3_v24.json",
-    }
+ #   {
+ #       "url": "https://raw.githubusercontent.com/AcademiaSD/comfyui_AcademiaSD/main/example_workflows/AcademiaSD_MiniMax-H3_v24.json",
+ #       "name": "AcademiaSD_MiniMax-H3_v24.json",
+ #   }
 ]
 
 def run_cmd_live(cmd, cwd=None):
