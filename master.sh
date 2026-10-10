@@ -15,7 +15,7 @@ mkdir -p /workspace
 # ==========================================
 is_enabled() {
     local var_name="$1"
-    local default_val="${2:-false}" # Default to false for optional features like RefMod
+    local default_val="${2:-true}"
     local val="${!var_name:-$default_val}"
     val=$(echo "$val" | tr '[:upper:]' '[:lower:]')
     [[ "$val" == "true" || "$val" == "1" || "$val" == "yes" ]]
@@ -57,13 +57,7 @@ run_task_background() {
 # ==========================================
 # 🚀 DYNAMIC SCRIPT FETCHING
 # ==========================================
-# Export this so Python scripts can read it for workflow downloading
-export REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
-
-echo "🛠️ Installing helper CLI tools..." | tee -a /workspace/provisioning.log
-curl -sL "$REPO_RAW_BASE/verprogreso.sh" -o /usr/local/bin/verprogreso 2>/dev/null
-chmod +x /usr/local/bin/verprogreso 2>/dev/null
-echo "✅ verprogreso installed." | tee -a /workspace/provisioning.log
+REPO_RAW_BASE="https://raw.githubusercontent.com/ginifacundo-tech/comfyui-vast-deploy/main"
 
 echo "🚀 Evaluating enabled scripts..."
 SCRIPTS_TO_DOWNLOAD=()
@@ -75,7 +69,6 @@ if is_enabled "ENABLE_DOWNLOAD_LORAS"; then SCRIPTS_TO_DOWNLOAD+=("download_lora
 if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then SCRIPTS_TO_DOWNLOAD+=("download_qwen_image.py"); fi
 if is_enabled "ENABLE_SAGEATTENTION"; then SCRIPTS_TO_DOWNLOAD+=("install_sageattention.py"); fi
 if is_enabled "ENABLE_MISSING_NODES"; then SCRIPTS_TO_DOWNLOAD+=("install_missing_nodes.py"); fi
-# NEW: RefMod toggle
 if is_enabled "INSTALL_REFMOD"; then SCRIPTS_TO_DOWNLOAD+=("install_refmod.py"); fi
 
 echo "🚀 Fetching enabled provisioning scripts from GitHub Repo..."
@@ -98,7 +91,7 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     mkdir -p "$WORKFLOW_DIR"
     python3 -c "
 import urllib.request, json, os, re
-base = os.environ.get('REPO_RAW_BASE', '')
+base = '$REPO_RAW_BASE'
 m = re.search(r'githubusercontent\.com/([^/]+/[^/]+)/', base)
 if not m: exit(0)
 api = f'https://api.github.com/repos/{m.group(1)}/contents/workflows'
@@ -141,11 +134,7 @@ fi
     if is_enabled "ENABLE_DOWNLOAD_LORAS"; then run_task_background "Downloading LoRAs" "/tmp/download_loras.py" "/workspace/loras_download.log"; fi
     if is_enabled "ENABLE_DOWNLOAD_QWEN_IMAGE"; then run_task_background "Downloading Qwen Image" "/tmp/download_qwen_image.py" "/workspace/qwen_image_download.log"; fi
     if is_enabled "ENABLE_SAGEATTENTION"; then run_task_background "Building SageAttention" "/tmp/install_sageattention.py" "/workspace/sageattention_build.log"; fi
-    
-    # NEW: RefMod Background Task
-    if is_enabled "INSTALL_REFMOD"; then 
-        run_task_background "Installing RefMod Nodes & Workflows" "/tmp/install_refmod.py" "/workspace/refmod_install.log"
-    fi
+    if is_enabled "INSTALL_REFMOD"; then run_task_background "Installing RefMod" "/tmp/install_refmod.py" "/workspace/refmod_install.log"; fi
 ) &
 BG_PID=$!
 
