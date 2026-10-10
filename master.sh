@@ -27,10 +27,13 @@ run_task_foreground() {
     echo "============================================================" | tee -a /workspace/provisioning.log
     echo "⏳ STARTING: $task_name" | tee -a /workspace/provisioning.log
     echo "============================================================" | tee -a /workspace/provisioning.log
-    if python3 "$script_path" 2>&1 | tee -a /workspace/provisioning.log; then
+    # -u forces Python to output in real-time without buffering
+    if python3 -u "$script_path" 2>&1 | tee -a /workspace/provisioning.log; then
+        echo "============================================================" | tee -a /workspace/provisioning.log
         echo "✅ COMPLETED: $task_name" | tee -a /workspace/provisioning.log
         echo "============================================================" | tee -a /workspace/provisioning.log
     else
+        echo "============================================================" | tee -a /workspace/provisioning.log
         echo "❌ ERROR: $task_name failed!" | tee -a /workspace/provisioning.log
         echo "============================================================" | tee -a /workspace/provisioning.log
         exit 1
@@ -41,16 +44,25 @@ run_task_background() {
     local task_name="$1"
     local script_path="$2"
     local log_file="$3"
-    echo "============================================================"
-    echo "⏳ STARTING: $task_name"
-    echo "   (Detailed output saving to $log_file)"
-    echo "============================================================"
-    if python3 "$script_path" > "$log_file" 2>&1; then
-        echo "✅ COMPLETED: $task_name"
-        echo "============================================================"
+    
+    # Log the start of the task to the main provisioning log
+    echo "============================================================" >> /workspace/provisioning.log
+    echo "⏳ STARTING (Background): $task_name" >> /workspace/provisioning.log
+    echo "============================================================" >> /workspace/provisioning.log
+    
+    # THE FIX: 
+    # 1. python3 -u (unbuffered real-time output)
+    # 2. tee -a /workspace/provisioning.log (copies output to main log)
+    # 3. >> "$log_file" (saves the original output to the specific task log)
+    if python3 -u "$script_path" 2>&1 | tee -a /workspace/provisioning.log >> "$log_file"; then
+        echo "============================================================" >> /workspace/provisioning.log
+        echo "✅ COMPLETED (Background): $task_name" >> /workspace/provisioning.log
+        echo "============================================================" >> /workspace/provisioning.log
     else
-        echo "❌ ERROR: $task_name failed!"
-        echo "============================================================"
+        echo "============================================================" >> /workspace/provisioning.log
+        echo "❌ ERROR (Background): $task_name failed!" >> /workspace/provisioning.log
+        echo "🔍 Check $log_file for isolated details." >> /workspace/provisioning.log
+        echo "============================================================" >> /workspace/provisioning.log
     fi
 }
 
@@ -89,7 +101,7 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then
 
     WORKFLOW_DIR="/workspace/ComfyUI/user/default/workflows"
     mkdir -p "$WORKFLOW_DIR"
-    python3 -c "
+    python3 -u -c "
 import urllib.request, json, os, re
 base = '$REPO_RAW_BASE'
 m = re.search(r'githubusercontent\.com/([^/]+/[^/]+)/', base)
