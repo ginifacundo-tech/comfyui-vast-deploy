@@ -27,6 +27,7 @@ run_task_foreground() {
     echo "============================================================" | tee -a /workspace/provisioning.log
     echo "⏳ STARTING: $task_name" | tee -a /workspace/provisioning.log
     echo "============================================================" | tee -a /workspace/provisioning.log
+    
     # -u forces Python to output in real-time without buffering
     if python3 -u "$script_path" 2>&1 | tee -a /workspace/provisioning.log; then
         echo "============================================================" | tee -a /workspace/provisioning.log
@@ -50,7 +51,7 @@ run_task_background() {
     echo "⏳ STARTING (Background): $task_name" >> /workspace/provisioning.log
     echo "============================================================" >> /workspace/provisioning.log
     
-    # THE FIX: 
+    # THE FIX:
     # 1. python3 -u (unbuffered real-time output)
     # 2. tee -a /workspace/provisioning.log (copies output to main log)
     # 3. >> "$log_file" (saves the original output to the specific task log)
@@ -98,9 +99,10 @@ done
 # ==========================================
 if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     run_task_foreground "Installing ComfyUI Core" "/tmp/install_comfyui.py"
-
+    
     WORKFLOW_DIR="/workspace/ComfyUI/user/default/workflows"
     mkdir -p "$WORKFLOW_DIR"
+    
     python3 -u -c "
 import urllib.request, json, os, re
 base = '$REPO_RAW_BASE'
@@ -115,7 +117,7 @@ try:
             if item['name'].endswith('.json') and item['type'] == 'file':
                 print(f'Downloading: {item[\"name\"]}')
                 urllib.request.urlretrieve(f'{base}/workflows/{item[\"name\"]}', os.path.join('$WORKFLOW_DIR', item['name']))
-        print('All base workflows downloaded.')
+    print('All base workflows downloaded.')
 except Exception as e: print(f'Workflow fetch: {e}')
 " | tee -a /workspace/provisioning.log
 
@@ -157,9 +159,31 @@ if is_enabled "ENABLE_INSTALL_COMFYUI"; then
     wait $BG_PID
     kill $COMFY_PID 2>/dev/null || pkill -f "ComfyUI/main.py"
     sleep 3
+
+    # --- UPDATE ALL NODES & CORE (Simulating Manager's "Update All") ---
+    echo "🔄 Updating ComfyUI Core and all Custom Nodes..." | tee -a /workspace/provisioning.log
     
+    # Update Core
+    if [ -d "/workspace/ComfyUI/.git" ]; then
+        echo "Updating ComfyUI Core..." | tee -a /workspace/provisioning.log
+        git -C "/workspace/ComfyUI" pull --ff-only >> /workspace/provisioning.log 2>&1 || echo "⚠️ Failed to update ComfyUI Core" | tee -a /workspace/provisioning.log
+    fi
+
+    # Update Custom Nodes
+    CUSTOM_NODES_DIR="/workspace/ComfyUI/custom_nodes"
+    if [ -d "$CUSTOM_NODES_DIR" ]; then
+        for d in "$CUSTOM_NODES_DIR"/*/ ; do
+            if [ -d "$d/.git" ]; then
+                node_name=$(basename "$d")
+                echo "Updating $node_name..." | tee -a /workspace/provisioning.log
+                git -C "$d" pull --ff-only >> /workspace/provisioning.log 2>&1 || echo "⚠️ Failed to update $node_name" | tee -a /workspace/provisioning.log
+            fi
+        done
+    fi
+    # ------------------------------------------------------------------
+
     LAUNCH_FLAGS="--listen 0.0.0.0 --port 8188 --enable-manager --enable-manager-legacy-ui"
-    if is_enabled "ENABLE_SAGEATTENTION"; then 
+    if is_enabled "ENABLE_SAGEATTENTION"; then
         LAUNCH_FLAGS="$LAUNCH_FLAGS --use-sage-attention"
     fi
     
