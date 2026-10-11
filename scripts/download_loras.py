@@ -27,6 +27,9 @@ LORAS_TO_DOWNLOAD = [
     ("HMNSFW-AIO-V2.5.safetensors", "2834417", "3152083"),
     ("H3_slop_bounce.safetensors", "2876282", "3137071"),
     ("PenisV2_minimax-h3_epoch60.safetensors", "2849923", "3130327"),
+    ("MMH3-MPOV.safetensors", "2966380", "3248858"),
+    ("BlackedRaw_Doggy_v1.1.safetensors", "2905434", "3241597"),
+    ("Minimax_H3_Unlocked_V2.safetensors", "2925727", "3242253"),
     #("filename", "model_id", "file_id"),
 ]
 
