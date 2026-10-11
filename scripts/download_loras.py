@@ -30,7 +30,17 @@ LORAS_TO_DOWNLOAD = [
     ("MMH3-MPOV.safetensors", "2966380", "3248858"),
     ("BlackedRaw_Doggy_v1.1.safetensors", "2905434", "3241597"),
     ("Minimax_H3_Unlocked_V2.safetensors", "2925727", "3242253"),
+    ("Blacked_Cowgirl_v0.1.safetensors", "2938209", "3212586"),
+    ("HMMisDogV1.5.safetensors", "2924146", "3244322"),
+    ("h3-ultimatedt-step00026000-frenulum-69glans-k3nk.safetensors", "2904180", "3218227"),
+    ("MM-H3 - Pussy Lora.safetensors", "2934054", "3206654"),
+    ("h3-cumshot-final-step16600-r16-k3nk.safetensors", "2945118", "3221173"),
+    ("CIMLG_v2_H3_step2500.safetensors", "2846978", "3289021"),
+    ("MMH3_NSFW_Doggystyle_Sex_3354622_epoch_20.safetensors", "2967815", "3250615"),
+    ("cowgirl-side-2-mh3-e50-az420.safetensors", "2546558", "3213328"),
+    ("LickingLips_V1_H3.safetensors", "2966667", "3249233"),
     #("filename", "model_id", "file_id"),
+
 ]
 
 print("🚀 Starting Lora downloads...")
