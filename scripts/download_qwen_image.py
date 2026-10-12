@@ -47,12 +47,12 @@ MODELS = [
         "filename": "text_encoders/qwen3vl_8b_bf16.safetensors",         # Replace with actual filename
         "dest": f"{COMFYUI_DIR}/models/text_encoders/"
     },
-         "env_var": "DOWNLOAD_QWEN_IMAGE_VAE_BF16",
+        { "env_var": "DOWNLOAD_QWEN_IMAGE_VAE_BF16",
         "repo": "Comfy-Org/Qwen-Image-2.1", # Replace with your actual Qwen repo
         "filename": "vae/qwen_image_2.1_vae_bf16.safetensors",         # Replace with actual filename
         "dest": f"{COMFYUI_DIR}/models/vae/"
     },
-        "env_var": "DOWNLOAD_QWEN_IMAGE_TURBO_LORA",
+       { "env_var": "DOWNLOAD_QWEN_IMAGE_TURBO_LORA",
         "repo": "Viggle/Qwen-Image-2.1-viggle-turbo", # Replace with your actual Qwen repo
         "filename": "Qwen-Image-2.1-viggle-turbo-v0.2-5step-lora-r256.safetensors",         # Replace with actual filename
         "dest": f"{COMFYUI_DIR}/models/loras/"
