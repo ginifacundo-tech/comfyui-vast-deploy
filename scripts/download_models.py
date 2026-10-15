@@ -48,6 +48,12 @@ MODELS = [
         "filename": "qwen3vl_32b_h3_ultra_uncensored_heretic_int8_convrot.safetensors", 
         "dest": f"{COMFYUI_DIR}/models/text_encoders/"
     },
+     {
+        "env_var": "DOWNLOAD_MINIMAX_H3_TURBO_LORA_COMFY-ORG",
+        "repo": "Comfy-Org/MiniMax-H3", 
+        "filename": "loras/minimax_h3_ref2v_turbo_4step_v0.1_comfyui_bf16.safetensors", 
+        "dest": f"{COMFYUI_DIR}//models/loras/"
+    },
     {
         "env_var": "DOWNLOAD_MINIMAX_H3_TURBO_LORA",
         "repo": "larryvrh/MiniMax-H3-Turbo-Lora", 
@@ -77,12 +83,6 @@ MODELS = [
         "repo": "WarmBloodAban/Minimax-h3_Singularity", 
         "filename": "Minimax-h3_Singularity_ref2va_Pruned_v1.3_int8.safetensors", 
         "dest": f"{COMFYUI_DIR}/models/diffusion_models/"
-    },
-    {
-        "env_var": "SET_ENV_VAR",
-        "repo": "REPO", 
-        "filename": "FILENAME", 
-        "dest": f"{COMFYUI_DIR}/DESTINATION_FOLDER/"
     },
     {
         "env_var": "SET_ENV_VAR",
